@@ -1,4 +1,15 @@
 <odoo>
+    <!-- Menu and Action -->
+    <menuitem id="menu_chilean_invoice_root" name="Chilean Electronic Invoices" sequence="1"/>
+    <menuitem id="menu_chilean_invoice_panel" name="Invoice Panel" parent="menu_chilean_invoice_root" action="action_invoice_mail_tree" sequence="1"/>
+    
+    <!-- Action -->
+    <record id="action_invoice_mail_tree" model="ir.actions.act_window">
+        <field name="name">Electronic Invoices</field>
+        <field name="res_model">invoice.mail</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
     <!-- Tree View -->
     <record id="view_invoice_mail_tree" model="ir.ui.view">
         <field name="name">invoice.mail.tree</field>
@@ -10,8 +21,8 @@
                 <field name="company_name"/>
                 <field name="total_amount"/>
                 <field name="status"/>
-                <button name="action_accept" type="object" string="Accept" class="oe_highlight" attrs="{'invisible': [('status', '!=', 'pending')]}"/>
-                <button name="action_reject" type="object" string="Reject" attrs="{'invisible': [('status', '!=', 'pending')]}"/>
+                <button name="action_accept" type="object" string="Accept" class="oe_highlight"/>
+                <button name="action_reject" type="object" string="Reject"/>
             </tree>
         </field>
     </record>
@@ -23,8 +34,8 @@
         <field name="arch" type="xml">
             <form string="Electronic Invoice">
                 <header>
-                    <button name="action_accept" type="object" string="Accept" class="oe_highlight" attrs="{'invisible': [('status', '!=', 'pending')]}"/>
-                    <button name="action_reject" type="object" string="Reject" attrs="{'invisible': [('status', '!=', 'pending')]}"/>
+                    <button name="action_accept" type="object" string="Accept" class="oe_highlight"/>
+                    <button name="action_reject" type="object" string="Reject"/>
                 </header>
                 <sheet>
                     <group>
@@ -40,17 +51,4 @@
             </form>
         </field>
     </record>
-
-        <!-- Action -->
-    <record id="action_invoice_mail_tree" model="ir.actions.act_window">
-        <field name="name">Electronic Invoices</field>
-        <field name="res_model">invoice.mail</field>
-        <field name="view_mode">tree,form</field>
-    </record>
-
-        <!-- Menu and Action -->
-    <menuitem id="menu_chilean_invoice_root" name="Chilean Electronic Invoices" sequence="1"/>
-    <menuitem id="menu_chilean_invoice_panel" name="Invoice Panel" parent="menu_chilean_invoice_root" action="action_invoice_mail_tree" sequence="1"/>
-    
-
 </odoo>
