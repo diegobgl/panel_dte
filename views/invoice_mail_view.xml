@@ -1,14 +1,6 @@
 <odoo>
-    <!-- Menu and Action -->
-    <menuitem id="menu_chilean_invoice_root" name="Chilean Electronic Invoices" sequence="1"/>
-    <menuitem id="menu_chilean_invoice_panel" name="Invoice Panel" parent="menu_chilean_invoice_root" action="action_invoice_mail_tree" sequence="1"/>
     
-    <!-- Action -->
-    <record id="action_invoice_mail_tree" model="ir.actions.act_window">
-        <field name="name">Electronic Invoices</field>
-        <field name="res_model">invoice.mail</field>
-        <field name="view_mode">tree,form</field>
-    </record>
+
 
     <!-- Tree View -->
     <record id="view_invoice_mail_tree" model="ir.ui.view">
@@ -51,4 +43,15 @@
             </form>
         </field>
     </record>
+        <!-- Action -->
+    <record id="action_invoice_mail_tree" model="ir.actions.act_window">
+        <field name="name">Electronic Invoices</field>
+        <field name="res_model">invoice.mail</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+        <!-- Menu and Action -->
+    <menuitem id="menu_chilean_invoice_root" name="Chilean Electronic Invoices" sequence="1"/>
+    <menuitem id="menu_chilean_invoice_panel" name="Invoice Panel" parent="menu_chilean_invoice_root" action="action_invoice_mail_tree" sequence="1"/>
+
 </odoo>
