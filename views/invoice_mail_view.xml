@@ -1,7 +1,4 @@
 <odoo>
-    
-
-
     <!-- Tree View -->
     <record id="view_invoice_mail_tree" model="ir.ui.view">
         <field name="name">invoice.mail.tree</field>
