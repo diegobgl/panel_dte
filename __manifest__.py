@@ -1,14 +1,14 @@
-
 {
-    'name': 'Chilean Electronic Invoice Importer',
+    'name': 'Panel DTE',
     'version': '1.0',
     'category': 'Accounting',
-    'summary': 'Module to import, and manage Chilean electronic invoices from XML',
-    'description': 'This module allows importing and managing Chilean electronic invoices.',
-    'author': 'Your Name',
-    'depends': ['mail', 'account'],
+    'summary': 'Manage Chilean DTEs in a custom panel',
+    'description': 'Allows receiving, viewing, and responding to Chilean DTEs.',
+    'author': 'Diego Gajardo',
+    'depends': ['mail', 'account', 'l10n_cl_edi'],
     'data': [
         'views/invoice_mail_view.xml',
+        'views/invoice_mail_extended_view.xml',
     ],
     'installable': True,
     'auto_install': False,
