@@ -10,9 +10,9 @@
                 <field name="company_name"/>
                 <field name="total_amount"/>
                 <field name="status"/>
-                <button name="action_accept_document" type="object" string="Aceptar" class="oe_highlight" 
+                <button name="action_accept" type="object" string="Aceptar" class="oe_highlight" 
                     attrs="{'invisible': [('state', '=', 'accepted')]}"/>
-                <button name="action_reject_document" type="object" string="Rechazar" 
+                <button name="action_reject" type="object" string="Rechazar" 
                     attrs="{'invisible': [('state', '=', 'rejected')]}"/>
             </tree>
         </field>
