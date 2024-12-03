@@ -33,21 +33,6 @@
         </field>
     </record>
 
-    <!-- Add Action to Action Bar -->
-    <record id="action_invoice_mail_tree" model="ir.actions.act_window">
-        <field name="name">Electronic Invoices</field>
-        <field name="res_model">invoice.mail</field>
-        <field name="view_mode">tree,form</field>
-        <field name="view_id" ref="view_invoice_mail_tree"/>
-        <field name="help" type="html">
-            <p class="oe_view_nocontent_create">
-                Click "Create" to add a new invoice.
-            </p>
-        </field>
-        <field name="context">{}</field>
-        <field name="binding_model_id" ref="model_invoice_mail"/>
-        <field name="binding_type">action</field>
-    </record>
 
 
     <!-- Form View -->
@@ -80,11 +65,20 @@
     </record>
 
 
-        <!-- Action -->
+    <!-- Add Action to Action Bar -->
     <record id="action_invoice_mail_tree" model="ir.actions.act_window">
         <field name="name">Electronic Invoices</field>
         <field name="res_model">invoice.mail</field>
         <field name="view_mode">tree,form</field>
+        <field name="view_id" ref="view_invoice_mail_tree"/>
+        <field name="help" type="html">
+            <p class="oe_view_nocontent_create">
+                Click "Create" to add a new invoice.
+            </p>
+        </field>
+        <field name="context">{}</field>
+        <field name="binding_model_id" ref="model_invoice_mail"/>
+        <field name="binding_type">action</field>
     </record>
 
         <!-- Menu and Action -->
