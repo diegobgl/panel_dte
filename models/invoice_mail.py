@@ -65,3 +65,17 @@ class InvoiceMail(models.Model):
 
     def action_reject(self):
         self.status = 'rejected'
+
+    @api.model
+    def fetch_emails(self):
+        """Fetch emails from the configured server and process them."""
+        # Obtener servidores de correo configurados
+        mail_servers = self.env['fetchmail.server'].search([('state', '=', 'connected')])
+        if not mail_servers:
+            raise UserError("No mail servers are connected. Please check the configuration.")
+
+        for server in mail_servers:
+            # Procesar correos para el servidor actual
+            server.fetch_mail()
+        return True
+

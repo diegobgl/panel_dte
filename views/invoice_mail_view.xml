@@ -7,6 +7,9 @@
         <field name="model">invoice.mail</field>
         <field name="arch" type="xml">
             <tree string="Electronic Invoices">
+                <header>
+                    <button name="fetch_emails" type="object" string="Fetch Emails" class="btn-primary oe_highlight" icon="fa-envelope"/>
+                </header>
                 <field name="name"/>
                 <field name="company_rut"/>
                 <field name="company_name"/>
