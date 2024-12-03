@@ -1,5 +1,7 @@
 <odoo>
+
     <!-- Tree View -->
+
     <record id="view_invoice_mail_tree" model="ir.ui.view">
         <field name="name">invoice.mail.tree</field>
         <field name="model">invoice.mail</field>
@@ -10,8 +12,24 @@
                 <field name="company_name"/>
                 <field name="total_amount"/>
                 <field name="status"/>
+                <field name="date_received"/> <!-- Mostrar la fecha en la vista lista -->
                 <button name="action_accept" type="object" string="Aceptar" class="oe_highlight"/>
                 <button name="action_reject" type="object" string="Rechazar" class="oe_highlight"/>
+            </tree>
+        </field>
+    </record>
+
+
+    <record id="view_invoice_mail_tree" model="ir.ui.view">
+        <field name="name">invoice.mail.tree</field>
+        <field name="model">invoice.mail</field>
+        <field name="arch" type="xml">
+            <tree string="Electronic Invoices">
+                <field name="name"/>
+                <field name="company_rut"/>
+                <field name="company_name"/>
+                <field name="total_amount"/>
+                <field name="status"/>
             </tree>
         </field>
     </record>
@@ -33,8 +51,12 @@
                         <field name="company_name"/>
                         <field name="total_amount"/>
                         <field name="status"/>
-                        <field name="xml_file"/>
-                        <field name="pdf_preview"/>
+                        <field name="date_received"/> <!-- Campo de fecha agregado al formulario -->
+                    </group>
+                    <group>
+                        <field name="xml_filename"/>
+                        <field name="xml_file" filename="xml_filename"/>
+                        <field name="pdf_preview" filename="pdf_preview"/>
                     </group>
                 </sheet>
             </form>
