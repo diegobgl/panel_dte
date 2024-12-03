@@ -6,7 +6,7 @@
         <field name="name">invoice.mail.tree</field>
         <field name="model">invoice.mail</field>
         <field name="arch" type="xml">
-            <tree string="Electronic Invoices">
+            <tree string="Electronic Invoices" >
                 <header>
                     <button name="fetch_emails" type="object" string="Fetch Emails" class="btn-primary oe_highlight" icon="fa-envelope"/>
                 </header>
@@ -21,6 +21,33 @@
             </tree>
         </field>
     </record>
+
+        <!-- Action Button -->
+    <record id="action_fetch_emails" model="ir.actions.server">
+        <field name="name">Fetch Emails</field>
+        <field name="model_id" ref="model_invoice_mail"/>
+        <field name="binding_model_id" ref="model_invoice_mail"/>
+        <field name="state">code</field>
+        <field name="code">
+            action = env['invoice.mail'].fetch_emails()
+        </field>
+    </record>
+
+    <!-- Add Action to Action Bar -->
+    <record id="action_invoice_mail_tree" model="ir.actions.act_window">
+        <field name="name">Electronic Invoices</field>
+        <field name="res_model">invoice.mail</field>
+        <field name="view_mode">tree,form</field>
+        <field name="view_id" ref="view_invoice_mail_tree"/>
+        <field name="help" type="html">
+            <p class="oe_view_nocontent_create">
+                Click "Create" to add a new invoice.
+            </p>
+        </field>
+        <field name="context">{}</field>
+        <field name="binding_model_id" ref="model_invoice_mail"/>
+        <field name="binding_type">action</field>
+
 
 
     <!-- Form View -->
@@ -51,6 +78,8 @@
             </form>
         </field>
     </record>
+
+
         <!-- Action -->
     <record id="action_invoice_mail_tree" model="ir.actions.act_window">
         <field name="name">Electronic Invoices</field>
