@@ -70,7 +70,7 @@
     </record>
 
         <!-- Menu and Action -->
-    <menuitem id="menu_chilean_invoice_root" name="Chilean Electronic Invoices" sequence="1"/>
+    <menuitem id="menu_chilean_invoice_root" name="Panel Electronic Invoices" sequence="1"/>
     <menuitem id="menu_chilean_invoice_panel" name="Invoice Panel" parent="menu_chilean_invoice_root" action="action_invoice_mail_tree" sequence="1"/>
 
 </odoo>
