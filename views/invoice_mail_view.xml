@@ -12,7 +12,7 @@
                 <field name="name"/>
                 <field name="company_rut"/>
                 <field name="company_name"/>
-                <field name="date_received"/> <!-- Mostrar la fecha en la vista lista -->
+                <field name="date_emission"/> <!-- Mostrar la fecha en la vista lista -->
                 <button name="action_accept" type="object" string="Aceptar" class="oe_highlight"/>
                 <button name="action_reject" type="object" string="Rechazar" class="oe_highlight"/>
             </tree>
