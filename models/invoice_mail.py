@@ -47,33 +47,33 @@ class InvoiceMail(models.Model):
 
     @api.model
     def message_new(self, msg_dict, custom_values=None):
-        """Create a new invoice record from an incoming email."""
+        """Procesar correo y extraer datos del XML."""
         custom_values = custom_values or {}
-        # Extract email content
-        subject = msg_dict.get('subject', '')
+        subject = msg_dict.get('subject', 'Imported Invoice')
         from_email = email_split(msg_dict.get('from', ''))[0]
         attachments = msg_dict.get('attachments', [])
 
-        # Process attachments
+        # Buscar y procesar el archivo XML
         xml_file = None
-        xml_filename = None
         for attachment in attachments:
-            if attachment[0].endswith('.xml'):
-                xml_file = base64.b64encode(attachment[1])
-                xml_filename = attachment[0]
+            if attachment[0].endswith('.xml'):  # Solo procesar archivos XML
+                xml_file = attachment[1]  # Contenido del archivo
+                break
 
-        # Create the record with the extracted data
-        custom_values.update({
-            'name': subject or 'Imported Invoice',
-            'company_name': from_email,
-            'email_subject': subject,
-            'email_from': from_email,
-            'xml_file': xml_file,
-            'xml_filename': xml_filename,
-            'date_received': fields.Datetime.now(),  # Establecer la fecha de recepción
-        })
+        if not xml_file:
+            raise UserError("No se encontró un archivo XML en el correo.")
 
-        return super().message_new(msg_dict, custom_values)
+        # Guardar el XML en el registro y procesar datos
+        custom_values.update({'name': subject, 'xml_file': base64.b64encode(xml_file)})
+        record = super().message_new(msg_dict, custom_values)
+
+        # Procesar datos del XML
+        try:
+            record.parse_xml(xml_file)
+        except Exception as e:
+            raise UserError(f"Error al procesar el XML: {e}")
+
+        return record
     
 
     @api.depends('xml_file')
@@ -102,17 +102,17 @@ class InvoiceMail(models.Model):
 
     @api.model
     def parse_xml(self, xml_content):
-        """Parse XML content and extract DTE data."""
-        root = ET.fromstring(xml_content)
+        """Extraer datos del XML y crear los registros asociados."""
         ns = {'sii': 'http://www.sii.cl/SiiDte'}
+        root = ET.fromstring(xml_content)
 
+        # Validar existencia del documento
         documento = root.find('.//sii:Documento', ns)
         if not documento:
             raise UserError("No se encontró un documento válido en el XML.")
 
+        # Extraer datos principales
         encabezado = documento.find('.//sii:Encabezado', ns)
-
-        # Encabezado
         tipo_dte = encabezado.find('.//sii:IdDoc/sii:TipoDTE', ns).text
         folio = encabezado.find('.//sii:IdDoc/sii:Folio', ns).text
         fecha_emision = encabezado.find('.//sii:IdDoc/sii:FchEmis', ns).text
@@ -124,8 +124,8 @@ class InvoiceMail(models.Model):
         rut_receptor = encabezado.find('.//sii:Receptor/sii:RUTRecep', ns).text
         razon_social_receptor = encabezado.find('.//sii:Receptor/sii:RznSocRecep', ns).text
 
-        # Crear Factura
-        invoice = self.create({
+        # Actualizar los datos del registro actual
+        self.write({
             'name': f'DTE {tipo_dte}-{folio}',
             'company_rut': rut_emisor,
             'company_name': razon_social_emisor,
@@ -135,7 +135,7 @@ class InvoiceMail(models.Model):
             'amount_total': float(monto_total),
         })
 
-        # Detalles
+        # Procesar detalles
         detalles = documento.findall('.//sii:Detalle', ns)
         for detalle in detalles:
             nombre_item = detalle.find('.//sii:NmbItem', ns).text
@@ -143,13 +143,14 @@ class InvoiceMail(models.Model):
             precio_item = detalle.find('.//sii:PrcItem', ns).text
 
             self.env['invoice.mail.line'].create({
-                'invoice_id': invoice.id,
+                'invoice_id': self.id,
                 'product_name': nombre_item,
                 'quantity': float(cantidad_item),
                 'price_unit': float(precio_item),
             })
 
-        return invoice
+        return True
+
 
 class InvoiceMailLine(models.Model):
     _name = 'invoice.mail.line'
