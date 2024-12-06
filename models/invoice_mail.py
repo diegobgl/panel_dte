@@ -47,33 +47,48 @@ class InvoiceMail(models.Model):
 
     @api.model
     def message_new(self, msg_dict, custom_values=None):
-        """Procesar correo y extraer datos del XML."""
+        """Procesar correo y extraer datos del XML y PDF adjuntos."""
         custom_values = custom_values or {}
         subject = msg_dict.get('subject', 'Imported Invoice')
         from_email = email_split(msg_dict.get('from', ''))[0]
         attachments = msg_dict.get('attachments', [])
 
-        # Buscar y procesar el archivo XML
+        # Variables para almacenar los archivos
         xml_file = None
+        pdf_file = None
+
+        # Procesar archivos adjuntos
         for attachment in attachments:
-            if attachment[0].endswith('.xml'):  # Solo procesar archivos XML
-                xml_file = attachment[1]  # Contenido del archivo
-                break
+            filename = attachment[0]
+            file_content = attachment[1]
 
-        if not xml_file:
-            raise UserError("No se encontró un archivo XML en el correo.")
+            if filename.endswith('.xml'):
+                xml_file = file_content
+            elif filename.endswith('.pdf'):
+                pdf_file = file_content
 
-        # Guardar el XML en el registro y procesar datos
-        custom_values.update({'name': subject, 'xml_file': base64.b64encode(xml_file)})
+        if not xml_file and not pdf_file:
+            raise UserError("No se encontraron archivos XML o PDF válidos en el correo.")
+
+        # Guardar el XML y PDF en el registro
+        custom_values.update({
+            'name': subject,
+            'xml_file': base64.b64encode(xml_file) if xml_file else False,
+            'pdf_preview': base64.b64encode(pdf_file) if pdf_file else False,
+        })
+
+        # Crear el registro
         record = super().message_new(msg_dict, custom_values)
 
-        # Procesar datos del XML
-        try:
-            record.parse_xml(xml_file)
-        except Exception as e:
-            raise UserError(f"Error al procesar el XML: {e}")
+        # Procesar datos del XML si está presente
+        if xml_file:
+            try:
+                record.parse_xml(xml_file)
+            except Exception as e:
+                raise UserError(f"Error al procesar el XML: {e}")
 
         return record
+
     
 
     @api.depends('xml_file')
