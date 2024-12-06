@@ -35,34 +35,46 @@
 
 
 
-    <!-- Form View -->
     <record id="view_invoice_mail_form" model="ir.ui.view">
         <field name="name">invoice.mail.form</field>
         <field name="model">invoice.mail</field>
         <field name="arch" type="xml">
-            <form string="Electronic Invoice">
-                <header>
-                    <button name="action_accept" type="object" string="Accept" class="oe_highlight"/>
-                    <button name="action_reject" type="object" string="Reject"/>
-                </header>
+            <form string="Factura Electrónica">
                 <sheet>
                     <group>
                         <field name="name"/>
                         <field name="company_rut"/>
                         <field name="company_name"/>
-                        <field name="total_amount"/>
-                        <field name="status"/>
-                        <field name="date_received"/> <!-- Campo de fecha agregado al formulario -->
+                        <field name="company_address"/>
+                        <field name="partner_rut"/>
+                        <field name="partner_name"/>
+                        <field name="partner_address"/>
+                        <field name="date_emission"/>
+                        <field name="date_due"/>
+                        <field name="amount_net"/>
+                        <field name="amount_tax"/>
+                        <field name="amount_total"/>
+                        <field name="xml_file" filename="name"/>
+                        <field name="pdf_preview" filename="name"/>
                     </group>
-                    <group>
-                        <field name="xml_filename"/>
-                        <field name="xml_file" filename="xml_filename"/>
-                        <field name="pdf_preview" filename="pdf_preview"/>
-                    </group>
+                    <notebook>
+                        <page string="Detalle de Productos">
+                            <field name="line_ids">
+                                <tree editable="bottom">
+                                    <field name="product_name"/>
+                                    <field name="product_code"/>
+                                    <field name="quantity"/>
+                                    <field name="price_unit"/>
+                                    <field name="subtotal"/>
+                                </tree>
+                            </field>
+                        </page>
+                    </notebook>
                 </sheet>
             </form>
         </field>
     </record>
+
 
 
     <!-- Add Action to Action Bar -->
