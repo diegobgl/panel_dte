@@ -45,7 +45,7 @@
                         <field name="name"/>
                         <field name="company_rut"/>
                         <field name="company_name"/>
-                        <field name="company_address"/>
+                        <!--field name="company_address"/-->
                         <field name="partner_rut"/>
                         <field name="partner_name"/>
                         <field name="partner_address"/>
