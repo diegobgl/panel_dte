@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 
 class InvoiceMail(models.Model):
     _name = 'invoice.mail'
-    _inherit = ['mail.thread', 'mail.activity.mixin']  # Agregar soporte para actividades
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _description = 'Imported Electronic Invoices'
 
     name = fields.Char(string='Document Name', required=True)
