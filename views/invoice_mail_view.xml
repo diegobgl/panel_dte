@@ -41,29 +41,25 @@
                     <field name="state" widget="statusbar" statusbar_visible="draft,pending,accepted,rejected"/>
                 </header>
                 <sheet>
-                        <div class="o_form_view">
-                            <div class="o_group o_group_col_6">
-                                <group>
-                                    <field name="name"/>
-                                    <field name="company_rut"/>
-                                    <field name="company_name"/>
-                                    <field name="partner_rut"/>
-                                    <field name="partner_name"/>
-                                    <field name="partner_address"/>
-                                </group>
-                            </div>
-                            <div class="o_group o_group_col_6">
-                                <group>
-                                    <field name="date_emission"/>
-                                    <field name="date_due"/>
-                                    <field name="amount_net"/>
-                                    <field name="amount_tax"/>
-                                    <field name="amount_total"/>
-                                    <field name="xml_file" filename="name"/>
-                                    <field name="pdf_preview" filename="name"/>
-                                </group>
-                            </div>
-                        </div>
+                    <group colspan="2">
+                        <group>
+                            <field name="name"/>
+                            <field name="company_rut"/>
+                            <field name="company_name"/>
+                            <field name="partner_rut"/>
+                            <field name="partner_name"/>
+                            <field name="partner_address"/>
+                        </group>
+                        <group>
+                            <field name="date_emission"/>
+                            <field name="date_due"/>
+                            <field name="amount_net"/>
+                            <field name="amount_tax"/>
+                            <field name="amount_total"/>
+                            <field name="xml_file" filename="name"/>
+                            <field name="pdf_preview" filename="name"/>
+                        </group>
+                    </group>
                     <notebook>
                         <page string="Detalle de Productos">
                             <field name="line_ids">
