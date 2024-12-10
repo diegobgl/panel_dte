@@ -49,6 +49,8 @@
                         <field name="partner_rut"/>
                         <field name="partner_name"/>
                         <field name="partner_address"/>
+                    </group>    
+                    <group>
                         <field name="date_emission"/>
                         <field name="date_due"/>
                         <field name="amount_net"/>
