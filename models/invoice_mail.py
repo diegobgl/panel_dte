@@ -103,11 +103,22 @@ class InvoiceMail(models.Model):
         for record in self:
             record.attachments_count = 1 if record.xml_file else 0
 
+    def action_set_pending(self):
+        """Cambiar el estado a Pendiente."""
+        self.state = 'pending'
+
     def action_accept(self):
-        self.status = 'accepted'
+        """Cambiar el estado a Aceptado."""
+        if self.state != 'pending':
+            raise UserError("Solo se pueden aceptar DTEs en estado pendiente.")
+        self.state = 'accepted'
 
     def action_reject(self):
-        self.status = 'rejected'
+        """Cambiar el estado a Rechazado."""
+        if self.state != 'pending':
+            raise UserError("Solo se pueden rechazar DTEs en estado pendiente.")
+        self.state = 'rejected'
+
 
     @api.model
     def fetch_emails(self):
