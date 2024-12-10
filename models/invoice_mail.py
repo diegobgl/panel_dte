@@ -5,9 +5,10 @@ import base64
 import xml.etree.ElementTree as ET
 
 
+
 class InvoiceMail(models.Model):
     _name = 'invoice.mail'
-    _inherit = ['mail.thread']
+    _inherit = ['mail.thread', 'mail.activity.mixin']  # Agregar soporte para actividades
     _description = 'Imported Electronic Invoices'
 
     name = fields.Char(string='Document Name', required=True)
