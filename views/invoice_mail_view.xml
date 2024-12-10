@@ -36,6 +36,14 @@
         <field name="model">invoice.mail</field>
         <field name="arch" type="xml">
             <form string="Factura Electrónica">
+                <header>
+                    <!-- Barra de estado -->
+                    <field name="state" widget="statusbar" statusbar_visible="draft,pending,accepted,rejected"/>
+                    <button name="action_set_pending" type="object" string="Marcar como Pendiente" states="draft" class="oe_highlight"/>
+                    <button name="action_accept" type="object" string="Aceptar" states="pending" class="oe_highlight"/>
+                    <button name="action_reject" type="object" string="Rechazar" states="pending"/>
+                </header>
+
                 <sheet>
                     <group>
                         <field name="name"/>

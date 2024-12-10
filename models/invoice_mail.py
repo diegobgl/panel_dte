@@ -26,6 +26,12 @@ class InvoiceMail(models.Model):
     xml_file = fields.Binary(string='Archivo XML', attachment=True)
     pdf_preview = fields.Binary(string='Previsualización PDF', attachment=True)
     line_ids = fields.One2many('invoice.mail.line', 'invoice_id', string='Detalle de Productos')
+    state = fields.Selection([
+            ('draft', 'Borrador'),
+            ('pending', 'Pendiente'),
+            ('accepted', 'Aceptado'),
+            ('rejected', 'Rechazado'),
+        ], default='draft', string='Estado', tracking=True)
 
 
     @api.model
