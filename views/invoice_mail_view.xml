@@ -37,13 +37,14 @@
         <field name="arch" type="xml">
             <form string="Factura Electrónica">
                 <header>
+                    <!-- Status Bar -->
                     <field name="state" widget="statusbar" statusbar_visible="draft,pending,accepted,rejected"/>
                     <button name="action_set_pending" type="object" string="Marcar como Pendiente"
-                        data-owl="{'show': 'record.state === \"draft\"'}" class="oe_highlight"/>
+                        t-if="o.state === 'draft'" class="oe_highlight"/>
                     <button name="action_accept" type="object" string="Aceptar"
-                        data-owl="{'show': 'record.state === \"pending\"'}" class="oe_highlight"/>
+                        t-if="o.state === 'pending'" class="oe_highlight"/>
                     <button name="action_reject" type="object" string="Rechazar"
-                        data-owl="{'show': 'record.state === \"pending\"'}"/>
+                        t-if="o.state === 'pending'"/>
                 </header>
                 <sheet>
                     <group>
