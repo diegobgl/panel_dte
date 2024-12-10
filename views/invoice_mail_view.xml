@@ -1,5 +1,4 @@
 <odoo>
-
     <!-- Tree View -->
     <record id="view_invoice_mail_tree" model="ir.ui.view">
         <field name="name">invoice.mail.tree</field>
@@ -67,11 +66,11 @@
                             </field>
                         </page>
                     </notebook>
-                    <div class="oe_chatter">
+                </sheet>
+                <div class="oe_chatter">
                     <field name="message_ids" widget="mail_thread"/>
                     <field name="activity_ids" widget="mail_activity"/>
-
-                </sheet>
+                </div>
             </form>
         </field>
     </record>
