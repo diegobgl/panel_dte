@@ -34,6 +34,12 @@ class InvoiceMail(models.Model):
         ], default='draft', string='Estado', tracking=True)
     l10n_cl_reference_ids = fields.One2many(
         'invoice.mail.reference', 'invoice_mail_id', string="References")
+    currency_id = fields.Many2one(
+        comodel_name="res.currency",
+        string="Currency",
+        default=lambda self: self.env.company.currency_id,  # Define la moneda predeterminada
+        required=True,
+    )
 
 
 
