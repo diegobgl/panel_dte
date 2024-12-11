@@ -32,6 +32,9 @@ class InvoiceMail(models.Model):
             ('accepted', 'Aceptado'),
             ('rejected', 'Rechazado'),
         ], default='draft', string='Estado', tracking=True)
+    l10n_cl_reference_ids = fields.One2many(
+        'invoice.mail.reference', 'invoice_mail_id', string="References")
+
 
 
     @api.model
@@ -226,3 +229,14 @@ class InvoiceMailReport(models.AbstractModel):
             'doc_model': 'invoice.mail',
             'docs': docs,
         }
+
+class InvoiceMailReference(models.Model):
+    _name = 'invoice.mail.reference'
+    _description = 'Invoice Mail References'
+
+    invoice_mail_id = fields.Many2one('invoice.mail', string="Invoice")
+    origin_doc_number = fields.Char(string="Origin Reference")
+    l10n_cl_reference_doc_type_id = fields.Many2one('l10n_cl.document.type', string="Reference Doc Type")
+    reference_doc_code = fields.Char(string="Reference Doc Code")
+    reason = fields.Char(string="Reason")
+    date = fields.Date(string="Date")
