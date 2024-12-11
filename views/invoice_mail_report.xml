@@ -1,11 +1,12 @@
 <odoo>
-    <report
-        id="action_invoice_mail_report"
-        model="invoice.mail"
-        string="Documento Electrónico"
-        report_type="qweb-pdf"
-        name="panel_dte.invoice_mail_report_document"
-        file="panel_dte.invoice_mail_report_document"
-        print_report_name="'Documento_' + object.name"
-    />
+    <record id="action_report_invoice_mail" model="ir.actions.report">
+        <field name="name">Reporte de Factura</field>
+        <field name="model">invoice.mail</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">panel_dte.invoice_mail_report</field>
+        <field name="print_report_name">"Factura - " + object.name</field>
+        <field name="binding_model_id" ref="model_invoice_mail"/>
+        <field name="binding_type">report</field>
+        <field name="binding_view_types">form</field>
+    </record>
 </odoo>
