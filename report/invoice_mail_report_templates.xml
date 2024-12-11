@@ -3,15 +3,14 @@
     <template id="invoice_mail_report">
         <t t-call="web.external_layout">
             <t t-foreach="docs" t-as="doc">
-            <div class="page">
-                <!-- Encabezado -->
-                <div class="text-center">
-                    <h2 t-field="doc.name"/>
-                    <p t-field="doc.company_name"/>
-                    <p t-field="doc.partner_name"/>
-                </div>
+                <div class="page">
+                    <!-- Encabezado -->
+                    <div class="text-center">
+                        <h2 t-field="doc.name"/>
+                        <p t-field="doc.company_name"/>
+                        <p t-field="doc.partner_name"/>
+                    </div>
                 <hr/>
-
                 <!-- Información General -->
                 <table class="table table-sm o_main_table">
                     <thead>
