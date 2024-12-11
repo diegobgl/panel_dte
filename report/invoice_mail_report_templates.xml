@@ -2,6 +2,7 @@
 <odoo>
     <template id="invoice_mail_report">
         <t t-call="web.external_layout">
+            <t t-foreach="docs" t-as="doc">
             <div class="page">
                 <!-- Encabezado -->
                 <div class="text-center">
