@@ -2,10 +2,10 @@
     <report
         id="action_invoice_mail_report"
         model="invoice.mail"
-        string="Reporte DTE"
+        string="Documento Electrónico"
         report_type="qweb-pdf"
-        name="panel_dte.invoice_mail_report"
-        file="panel_dte.invoice_mail_report"
-        print_report_name="'Reporte_' + object.name"
+        name="panel_dte.invoice_mail_report_document"
+        file="panel_dte.invoice_mail_report_document"
+        print_report_name="'Documento_' + object.name"
     />
 </odoo>
