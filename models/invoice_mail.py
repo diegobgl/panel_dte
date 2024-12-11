@@ -133,56 +133,69 @@ class InvoiceMail(models.Model):
             server.fetch_mail()
         return True
 
-    @api.model
     def parse_xml(self, xml_content):
-        """Extraer datos del XML y crear los registros asociados."""
+        """Parse XML content and extract DTE data, including IVA neto and total."""
+        import xml.etree.ElementTree as ET
+        from odoo.exceptions import UserError
+
+        # Define el namespace
         ns = {'sii': 'http://www.sii.cl/SiiDte'}
-        root = ET.fromstring(xml_content)
 
-        # Validar existencia del documento
-        documento = root.find('.//sii:Documento', ns)
-        if not documento:
-            raise UserError("No se encontró un documento válido en el XML.")
+        try:
+            # Analiza el contenido del XML
+            root = ET.fromstring(xml_content)
+            documento = root.find('.//sii:Documento', ns)
+            if not documento:
+                raise UserError("No se encontró un documento válido en el XML.")
 
-        # Extraer datos principales
-        encabezado = documento.find('.//sii:Encabezado', ns)
-        tipo_dte = encabezado.find('.//sii:IdDoc/sii:TipoDTE', ns).text
-        folio = encabezado.find('.//sii:IdDoc/sii:Folio', ns).text
-        fecha_emision = encabezado.find('.//sii:IdDoc/sii:FchEmis', ns).text
-        monto_total = encabezado.find('.//sii:Totales/sii:MntTotal', ns).text
+            encabezado = documento.find('.//sii:Encabezado', ns)
 
-        # Emisor y Receptor
-        rut_emisor = encabezado.find('.//sii:Emisor/sii:RUTEmisor', ns).text
-        razon_social_emisor = encabezado.find('.//sii:Emisor/sii:RznSoc', ns).text
-        rut_receptor = encabezado.find('.//sii:Receptor/sii:RUTRecep', ns).text
-        razon_social_receptor = encabezado.find('.//sii:Receptor/sii:RznSocRecep', ns).text
+            # Extrae los datos del encabezado
+            tipo_dte = encabezado.find('.//sii:IdDoc/sii:TipoDTE', ns).text
+            folio = encabezado.find('.//sii:IdDoc/sii:Folio', ns).text
+            fecha_emision = encabezado.find('.//sii:IdDoc/sii:FchEmis', ns).text
+            monto_total = encabezado.find('.//sii:Totales/sii:MntTotal', ns).text
+            monto_neto = encabezado.find('.//sii:Totales/sii:MntNeto', ns).text
+            iva = encabezado.find('.//sii:Totales/sii:IVA', ns).text
 
-        # Actualizar los datos del registro actual
-        self.write({
-            'name': f'DTE {tipo_dte}-{folio}',
-            'company_rut': rut_emisor,
-            'company_name': razon_social_emisor,
-            'partner_rut': rut_receptor,
-            'partner_name': razon_social_receptor,
-            'date_emission': fecha_emision,
-            'amount_total': float(monto_total),
-        })
+            # Extrae datos del emisor y receptor
+            rut_emisor = encabezado.find('.//sii:Emisor/sii:RUTEmisor', ns).text
+            razon_social_emisor = encabezado.find('.//sii:Emisor/sii:RznSoc', ns).text
+            rut_receptor = encabezado.find('.//sii:Receptor/sii:RUTRecep', ns).text
+            razon_social_receptor = encabezado.find('.//sii:Receptor/sii:RznSocRecep', ns).text
 
-        # Procesar detalles
-        detalles = documento.findall('.//sii:Detalle', ns)
-        for detalle in detalles:
-            nombre_item = detalle.find('.//sii:NmbItem', ns).text
-            cantidad_item = detalle.find('.//sii:QtyItem', ns).text
-            precio_item = detalle.find('.//sii:PrcItem', ns).text
-
-            self.env['invoice.mail.line'].create({
-                'invoice_id': self.id,
-                'product_name': nombre_item,
-                'quantity': float(cantidad_item),
-                'price_unit': float(precio_item),
+            # Crea el registro de factura
+            invoice = self.create({
+                'name': f'DTE {tipo_dte}-{folio}',
+                'company_rut': rut_emisor,
+                'company_name': razon_social_emisor,
+                'partner_rut': rut_receptor,
+                'partner_name': razon_social_receptor,
+                'date_emission': fecha_emision,
+                'amount_total': float(monto_total),
+                'amount_net': float(monto_neto),
+                'amount_tax': float(iva),
             })
 
-        return True
+            # Extrae los detalles de productos/servicios
+            detalles = documento.findall('.//sii:Detalle', ns)
+            for detalle in detalles:
+                nombre_item = detalle.find('.//sii:NmbItem', ns).text
+                cantidad_item = detalle.find('.//sii:QtyItem', ns).text
+                precio_item = detalle.find('.//sii:PrcItem', ns).text
+
+                self.env['invoice.mail.line'].create({
+                    'invoice_id': invoice.id,
+                    'product_name': nombre_item,
+                    'quantity': float(cantidad_item),
+                    'price_unit': float(precio_item),
+                })
+
+            return invoice
+        except ET.ParseError as e:
+            raise UserError(f"Error al analizar el XML: {e}")
+        except Exception as e:
+            raise UserError(f"Error procesando el XML: {e}")
 
 
 class InvoiceMailLine(models.Model):
