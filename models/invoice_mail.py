@@ -213,3 +213,16 @@ class InvoiceMailLine(models.Model):
     def _compute_subtotal(self):
         for line in self:
             line.subtotal = line.quantity * line.price_unit
+
+
+class InvoiceMailReport(models.AbstractModel):
+    _name = 'report.panel_dte.invoice_mail_report'
+    _description = 'Invoice Mail Report'
+
+    def _get_report_values(self, docids, data=None):
+        docs = self.env['invoice.mail'].browse(docids)
+        return {
+            'doc_ids': docids,
+            'doc_model': 'invoice.mail',
+            'docs': docs,
+        }

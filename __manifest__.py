@@ -8,6 +8,9 @@
     'depends': ['mail', 'account', 'l10n_cl_edi'],
     'data': [
         'views/invoice_mail_view.xml'
+        'report/invoice_mail_report_templates.xml'
+        'views/invoice_mail_view.xml'
+
     ],
     'installable': True,
     'auto_install': False,
