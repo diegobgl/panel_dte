@@ -27,19 +27,22 @@ class InvoiceMail(models.Model):
     pdf_preview = fields.Binary(string='Previsualización PDF', attachment=True)
     line_ids = fields.One2many('invoice.mail.line', 'invoice_id', string='Detalle de Productos')
     state = fields.Selection([
-            ('draft', 'Borrador'),
-            ('pending', 'Pendiente'),
-            ('accepted', 'Aceptado'),
-            ('rejected', 'Rechazado'),
-        ], default='draft', string='Estado', tracking=True)
+        ('draft', 'Borrador'),
+        ('pending', 'Pendiente'),
+        ('accepted', 'Aceptado'),
+        ('rejected', 'Rechazado'),
+    ], default='draft', string='Estado', tracking=True)
     l10n_cl_reference_ids = fields.One2many(
         'invoice.mail.reference', 'invoice_mail_id', string="References")
     currency_id = fields.Many2one(
         comodel_name="res.currency",
         string="Currency",
-        default=lambda self: self.env.company.currency_id,  # Define la moneda predeterminada
+        default=lambda self: self.env.company.currency_id,
         required=True,
     )
+    folio = fields.Char(string='Folio', help="Número de folio del documento DTE")
+    dte_type = fields.Char(string='Tipo de Documento', help="Tipo de documento DTE (Ejemplo: Factura, Nota de crédito, etc.)")
+
 
 
 
@@ -89,7 +92,6 @@ class InvoiceMail(models.Model):
 
         # Procesar el XML y extraer datos relevantes
         try:
-            import xml.etree.ElementTree as ET
             ns = {'sii': 'http://www.sii.cl/SiiDte'}
             root = ET.fromstring(xml_file)
             documento = root.find('.//sii:Documento', ns)
@@ -124,6 +126,8 @@ class InvoiceMail(models.Model):
                 'amount_total': float(monto_total),
                 'amount_net': float(monto_neto),
                 'amount_tax': float(iva),
+                'folio': folio,
+                'dte_type': tipo_dte,
                 'xml_file': base64.b64encode(xml_file),
                 'pdf_preview': base64.b64encode(pdf_file) if pdf_file else False,
             })
@@ -161,6 +165,7 @@ class InvoiceMail(models.Model):
         )
 
         return record
+
 
         
 

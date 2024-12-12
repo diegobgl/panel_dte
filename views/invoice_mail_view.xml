@@ -42,6 +42,7 @@
                 </header>
                 <sheet>
                     <group colspan="2">
+                        <!-- Información del Documento -->
                         <group>
                             <field name="name"/>
                             <field name="company_rut"/>
@@ -50,6 +51,7 @@
                             <field name="partner_name"/>
                             <field name="partner_address"/>
                         </group>
+                        <!-- Fechas, Montos y Archivos -->
                         <group>
                             <field name="date_emission"/>
                             <field name="date_due"/>
@@ -59,6 +61,11 @@
                             <field name="xml_file" filename="name"/>
                             <field name="pdf_preview" filename="name"/>
                         </group>
+                    </group>
+                    <!-- Nuevos Campos: Folio y Tipo de Documento -->
+                    <group string="Información DTE">
+                        <field name="folio"/>
+                        <field name="dte_type"/>
                     </group>
                     <notebook>
                         <page string="Detalle de Productos">
@@ -81,6 +88,7 @@
             </form>
         </field>
     </record>
+
 
 
 
