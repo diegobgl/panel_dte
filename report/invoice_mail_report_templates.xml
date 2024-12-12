@@ -39,7 +39,7 @@
                                 </tr>
                                 <tr>
                                     <td>Dirección Receptor</td>
-                                    <td><span t-field="doc.partner_address or 'N/A'"/></td>
+                                    <td><span t-field="doc.partner_address "/></td>
                                 </tr>
                                 <tr>
                                     <td>Fecha de Emisión</td>

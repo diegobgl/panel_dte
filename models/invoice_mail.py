@@ -63,10 +63,9 @@ class InvoiceMail(models.Model):
 
     @api.model
     def message_new(self, msg_dict, custom_values=None):
-        """Procesar correo y extraer datos del XML y PDF adjuntos."""
+        """Procesar correo y crear registro con datos extraídos del XML."""
         custom_values = custom_values or {}
         subject = msg_dict.get('subject', 'Imported Invoice')
-        from_email = email_split(msg_dict.get('from', ''))[0]
         attachments = msg_dict.get('attachments', [])
 
         # Variables para almacenar los archivos
@@ -83,27 +82,22 @@ class InvoiceMail(models.Model):
             elif filename.endswith('.pdf'):
                 pdf_file = file_content
 
-        if not xml_file and not pdf_file:
-            raise UserError("No se encontraron archivos XML o PDF válidos en el correo.")
+        if not xml_file:
+            raise UserError("No se encontró un archivo XML válido en el correo.")
 
-        # Guardar el XML y PDF en el registro
+        # Procesar datos del XML antes de crear el registro
+        parsed_data = self.parse_xml(xml_file)
+
+        # Actualizar valores personalizados con datos extraídos del XML y correo
         custom_values.update({
             'name': subject,
-            'xml_file': base64.b64encode(xml_file) if xml_file else False,
+            'xml_file': base64.b64encode(xml_file),
             'pdf_preview': base64.b64encode(pdf_file) if pdf_file else False,
+            **parsed_data,  # Incluir los datos extraídos del XML
         })
 
-        # Crear el registro
-        record = super().message_new(msg_dict, custom_values)
-
-        # Procesar datos del XML si está presente
-        if xml_file:
-            try:
-                record.parse_xml(xml_file)
-            except Exception as e:
-                raise UserError(f"Error al procesar el XML: {e}")
-
-        return record
+        # Crear el registro con los valores completos
+        return super().message_new(msg_dict, custom_values)
 
     
 
@@ -143,15 +137,9 @@ class InvoiceMail(models.Model):
         return True
 
     def parse_xml(self, xml_content):
-        """Parse XML content and extract DTE data, including IVA neto and total."""
-        import xml.etree.ElementTree as ET
-        from odoo.exceptions import UserError
-
-        # Define el namespace
+        """Parse XML content and extract DTE data."""
         ns = {'sii': 'http://www.sii.cl/SiiDte'}
-
         try:
-            # Analiza el contenido del XML
             root = ET.fromstring(xml_content)
             documento = root.find('.//sii:Documento', ns)
             if not documento:
@@ -159,22 +147,20 @@ class InvoiceMail(models.Model):
 
             encabezado = documento.find('.//sii:Encabezado', ns)
 
-            # Extrae los datos del encabezado
+            # Extraer datos
             tipo_dte = encabezado.find('.//sii:IdDoc/sii:TipoDTE', ns).text
             folio = encabezado.find('.//sii:IdDoc/sii:Folio', ns).text
             fecha_emision = encabezado.find('.//sii:IdDoc/sii:FchEmis', ns).text
             monto_total = encabezado.find('.//sii:Totales/sii:MntTotal', ns).text
             monto_neto = encabezado.find('.//sii:Totales/sii:MntNeto', ns).text
             iva = encabezado.find('.//sii:Totales/sii:IVA', ns).text
-
-            # Extrae datos del emisor y receptor
             rut_emisor = encabezado.find('.//sii:Emisor/sii:RUTEmisor', ns).text
             razon_social_emisor = encabezado.find('.//sii:Emisor/sii:RznSoc', ns).text
             rut_receptor = encabezado.find('.//sii:Receptor/sii:RUTRecep', ns).text
             razon_social_receptor = encabezado.find('.//sii:Receptor/sii:RznSocRecep', ns).text
 
-            # Crea el registro de factura
-            invoice = self.create({
+            # Preparar datos para el registro
+            return {
                 'name': f'DTE {tipo_dte}-{folio}',
                 'company_rut': rut_emisor,
                 'company_name': razon_social_emisor,
@@ -184,27 +170,12 @@ class InvoiceMail(models.Model):
                 'amount_total': float(monto_total),
                 'amount_net': float(monto_neto),
                 'amount_tax': float(iva),
-            })
-
-            # Extrae los detalles de productos/servicios
-            detalles = documento.findall('.//sii:Detalle', ns)
-            for detalle in detalles:
-                nombre_item = detalle.find('.//sii:NmbItem', ns).text
-                cantidad_item = detalle.find('.//sii:QtyItem', ns).text
-                precio_item = detalle.find('.//sii:PrcItem', ns).text
-
-                self.env['invoice.mail.line'].create({
-                    'invoice_id': invoice.id,
-                    'product_name': nombre_item,
-                    'quantity': float(cantidad_item),
-                    'price_unit': float(precio_item),
-                })
-
-            return invoice
+            }
         except ET.ParseError as e:
             raise UserError(f"Error al analizar el XML: {e}")
         except Exception as e:
             raise UserError(f"Error procesando el XML: {e}")
+
 
 
 class InvoiceMailLine(models.Model):
