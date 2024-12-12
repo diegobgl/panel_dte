@@ -147,7 +147,7 @@ class InvoiceMail(models.Model):
 
             encabezado = documento.find('.//sii:Encabezado', ns)
 
-            # Extraer datos
+            # Extraer datos del encabezado
             tipo_dte = encabezado.find('.//sii:IdDoc/sii:TipoDTE', ns).text
             folio = encabezado.find('.//sii:IdDoc/sii:Folio', ns).text
             fecha_emision = encabezado.find('.//sii:IdDoc/sii:FchEmis', ns).text
@@ -159,8 +159,8 @@ class InvoiceMail(models.Model):
             rut_receptor = encabezado.find('.//sii:Receptor/sii:RUTRecep', ns).text
             razon_social_receptor = encabezado.find('.//sii:Receptor/sii:RznSocRecep', ns).text
 
-            # Preparar datos para el registro
-            return {
+            # Crear el registro de la factura
+            invoice = self.create({
                 'name': f'DTE {tipo_dte}-{folio}',
                 'company_rut': rut_emisor,
                 'company_name': razon_social_emisor,
@@ -170,12 +170,32 @@ class InvoiceMail(models.Model):
                 'amount_total': float(monto_total),
                 'amount_net': float(monto_neto),
                 'amount_tax': float(iva),
-            }
+            })
+
+            # Extraer los detalles de productos/servicios
+            detalles = documento.findall('.//sii:Detalle', ns)
+            if not detalles:
+                raise UserError("No se encontraron detalles de productos en el XML.")
+
+            for detalle in detalles:
+                nombre_item = detalle.find('.//sii:NmbItem', ns)
+                cantidad_item = detalle.find('.//sii:QtyItem', ns)
+                precio_item = detalle.find('.//sii:PrcItem', ns)
+
+                # Crear las líneas de productos solo si todos los datos están presentes
+                if nombre_item is not None and cantidad_item is not None and precio_item is not None:
+                    self.env['invoice.mail.line'].create({
+                        'invoice_id': invoice.id,
+                        'product_name': nombre_item.text,
+                        'quantity': float(cantidad_item.text),
+                        'price_unit': float(precio_item.text),
+                    })
+
+            return invoice
         except ET.ParseError as e:
             raise UserError(f"Error al analizar el XML: {e}")
         except Exception as e:
             raise UserError(f"Error procesando el XML: {e}")
-
 
 
 class InvoiceMailLine(models.Model):
