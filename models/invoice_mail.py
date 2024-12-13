@@ -169,7 +169,7 @@ class InvoiceMail(models.Model):
 
         return record
     
-    
+
     @api.depends('xml_file')
     def _compute_attachments_count(self):
         for record in self:
@@ -273,7 +273,7 @@ class InvoiceMailLine(models.Model):
 
     invoice_id = fields.Many2one('invoice.mail', string='Factura', ondelete='cascade')
     product_name = fields.Char(string='Producto/Servicio')
-    description = fields.Text(string='Descripción')  # Nuevo campo para DscItem
+    description = fields.Text(string='Descripción')  
     product_code = fields.Char(string='Código')
     quantity = fields.Float(string='Cantidad')
     price_unit = fields.Float(string='Precio Unitario')
