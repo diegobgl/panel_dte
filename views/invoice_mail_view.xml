@@ -72,6 +72,7 @@
                             <field name="line_ids">
                                 <tree editable="bottom">
                                     <field name="product_name"/>
+                                    <field name="description"/>
                                     <field name="product_code"/>
                                     <field name="quantity"/>
                                     <field name="price_unit"/>
