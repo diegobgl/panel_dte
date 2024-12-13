@@ -273,11 +273,12 @@ class InvoiceMailLine(models.Model):
 
     invoice_id = fields.Many2one('invoice.mail', string='Factura', ondelete='cascade')
     product_name = fields.Char(string='Producto/Servicio')
-    description = fields.Text(string='Descripción')  
     product_code = fields.Char(string='Código')
     quantity = fields.Float(string='Cantidad')
     price_unit = fields.Float(string='Precio Unitario')
     subtotal = fields.Float(string='Subtotal', compute='_compute_subtotal', store=True)
+    description = fields.Text(string='Descripción')  
+
 
     @api.depends('quantity', 'price_unit')
     def _compute_subtotal(self):
