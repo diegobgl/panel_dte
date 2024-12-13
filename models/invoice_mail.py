@@ -146,12 +146,15 @@ class InvoiceMail(models.Model):
                 nombre_item = detalle.find('.//sii:NmbItem', ns).text
                 cantidad_item = detalle.find('.//sii:QtyItem', ns).text
                 precio_item = detalle.find('.//sii:PrcItem', ns).text
+                descripcion_item = detalle.find('.//sii:DscItem', ns)
+                descripcion_texto = descripcion_item.text if descripcion_item is not None else ''
 
                 self.env['invoice.mail.line'].create({
                     'invoice_id': record.id,
                     'product_name': nombre_item,
                     'quantity': float(cantidad_item),
                     'price_unit': float(precio_item),
+                    'description': descripcion_texto,  # Asigna la descripción
                 })
         except Exception as e:
             raise UserError(f"Error al procesar los detalles del XML: {e}")
@@ -165,10 +168,8 @@ class InvoiceMail(models.Model):
         )
 
         return record
-
-
-        
-
+    
+    
     @api.depends('xml_file')
     def _compute_attachments_count(self):
         for record in self:
@@ -272,6 +273,7 @@ class InvoiceMailLine(models.Model):
 
     invoice_id = fields.Many2one('invoice.mail', string='Factura', ondelete='cascade')
     product_name = fields.Char(string='Producto/Servicio')
+    description = fields.Text(string='Descripción')  # Nuevo campo para DscItem
     product_code = fields.Char(string='Código')
     quantity = fields.Float(string='Cantidad')
     price_unit = fields.Float(string='Precio Unitario')
