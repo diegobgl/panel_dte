@@ -80,6 +80,17 @@
                                 </tree>
                             </field>
                         </page>
+                        <page string="Referencias DTE">
+                            <field name="l10n_cl_reference_ids">
+                                <tree editable="bottom">
+                                    <field name="origin_doc_number" string="Número de Documento Origen"/>
+                                    <field name="l10n_cl_reference_doc_type_id" string="Tipo de Documento"/>
+                                    <field name="reference_doc_code" string="Código de Referencia"/>
+                                    <field name="reason" string="Razón"/>
+                                    <field name="date" string="Fecha"/>
+                                </tree>
+                            </field>
+                        </page>
                     </notebook>
                 </sheet>
                 <div class="oe_chatter">
@@ -89,6 +100,7 @@
             </form>
         </field>
     </record>
+
 
 
 
