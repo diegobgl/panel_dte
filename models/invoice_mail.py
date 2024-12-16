@@ -3,7 +3,6 @@ from odoo.tools import email_split
 from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
-from odoo  import l10n_cl.edi.util
 
 
 
