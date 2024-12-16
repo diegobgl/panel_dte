@@ -64,8 +64,8 @@
                     </group>
                     <!-- Nuevos Campos: Folio y Tipo de Documento -->
                     <group string="Información DTE">
-                        <field name="folio"/>
-                        <field name="dte_type"/>
+                        <field name="folio_number"/>
+                        <field name="document_type"/>
                     </group>
                     <notebook>
                         <page string="Detalle de Productos">
