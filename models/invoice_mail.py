@@ -227,24 +227,32 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error sending DTE to SII: {e}")
 
     def action_check_sii_status(self):
-        """Check the status of the DTE in SII."""
+        """Check the status of the DTE in SII using folio and emitter RUT."""
         self.ensure_one()
-        if not self.l10n_cl_sii_track_id:
-            raise UserError("No SII Track ID found.")
+        if not self.folio_number or not self.company_rut or not self.document_type:
+            raise UserError("Faltan datos requeridos: Folio, RUT del Emisor o Tipo de Documento.")
 
-        # Consultar estado en SII
         try:
-            response = self._get_send_status(
-                self.env.company.l10n_cl_dte_service_provider,
-                self.l10n_cl_sii_track_id,
-                self.env.company.vat,
-                self.env.company._get_digital_signature(self.env.user.id)
+            # Llama al método para consultar el estado en el SII
+            response = self._query_sii_status(
+                self.company_rut,
+                self.folio_number,
+                self.document_type.code,  # Código del tipo de documento (Ej. 33 para Factura Electrónica)
+                self.env.company._get_digital_signature(self.env.user.id)  # Firma digital
             )
-            self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
-            if self.l10n_cl_dte_status == 'accepted':
+
+            # Procesar la respuesta y actualizar el estado del documento
+            sii_status = response.get('STATUS', 'unknown')
+            self.l10n_cl_dte_status = sii_status
+            if sii_status == 'accepted':
                 self.state = 'accepted'
+            elif sii_status == 'rejected':
+                self.state = 'rejected'
+            else:
+                self.state = 'pending'
+
         except Exception as e:
-            raise UserError(f"Error checking SII status: {e}")
+            raise UserError(f"Error al consultar el estado en el SII: {e}")
 
     def _send_xml_to_sii(self, provider, vat, xml_file, signature):
         """Enviar el archivo XML al SII."""
