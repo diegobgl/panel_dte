@@ -27,11 +27,11 @@ class InvoiceMail(models.Model):
     pdf_preview = fields.Binary(string='Previsualización PDF', attachment=True)
     line_ids = fields.One2many('invoice.mail.line', 'invoice_id', string='Detalle de Productos')
     state = fields.Selection([
-        ('draft', 'Borrador'),
-        ('pending', 'Pendiente'),
-        ('accepted', 'Aceptado'),
-        ('rejected', 'Rechazado'),
-    ], default='draft', string='Estado', tracking=True)
+        ('draft', 'Draft'),
+        ('sent', 'Sent'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+    ], default='draft', string='Status', tracking=True)
     l10n_cl_reference_ids = fields.One2many(
         'invoice.mail.reference', 'invoice_mail_id', string="References")
     currency_id = fields.Many2one(
@@ -40,8 +40,15 @@ class InvoiceMail(models.Model):
         default=lambda self: self.env.company.currency_id,
         required=True,
     )
-    folio = fields.Char(string='Folio', help="Número de folio del documento DTE")
-    dte_type = fields.Char(string='Tipo de Documento', help="Tipo de documento DTE (Ejemplo: Factura, Nota de crédito, etc.)")
+    folio_number = fields.Char(string='Folio Number')
+    document_type = fields.Many2one('l10n_latam.document.type', string='Document Type')
+    l10n_cl_sii_track_id = fields.Char(string='SII Track ID')
+    l10n_cl_dte_status = fields.Selection([
+        ('not_sent', 'Not Sent'),
+        ('ask_for_status', 'Ask for Status'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+    ], string='SII Status', default='not_sent')
 
 
 
@@ -192,18 +199,69 @@ class InvoiceMail(models.Model):
         self.state = 'rejected'
 
 
-    @api.model
-    def fetch_emails(self):
-        """Fetch emails from the configured server and process them."""
-        # Obtener servidores de correo configurados
-        mail_servers = self.env['fetchmail.server'].search([('state', '=', 'connected')])
-        if not mail_servers:
-            raise UserError("No mail servers are connected. Please check the configuration.")
+    # @api.model
+    # def fetch_emails(self):
+    #     """Fetch emails from the configured server and process them."""
+    #     # Obtener servidores de correo configurados
+    #     mail_servers = self.env['fetchmail.server'].search([('state', '=', 'connected')])
+    #     if not mail_servers:
+    #         raise UserError("No mail servers are connected. Please check the configuration.")
 
-        for server in mail_servers:
-            # Procesar correos para el servidor actual
-            server.fetch_mail()
-        return True
+    #     for server in mail_servers:
+    #         # Procesar correos para el servidor actual
+    #         server.fetch_mail()
+    #     return True
+    
+    def action_send_to_sii(self):
+        """Send DTE to SII."""
+        self.ensure_one()
+        if not self.xml_file:
+            raise UserError("No XML file available to send.")
+
+        # Aquí deberías usar métodos de `l10n_cl_edi_util` para enviar al SII.
+        try:
+            digital_signature = self.env.company._get_digital_signature(self.env.user.id)
+            response = self._send_xml_to_sii(
+                self.env.company.l10n_cl_dte_service_provider,
+                self.env.company.vat,
+                self.xml_file,
+                digital_signature
+            )
+            self.l10n_cl_sii_track_id = response.get('TRACKID')
+            self.l10n_cl_dte_status = 'ask_for_status'
+        except Exception as e:
+            raise UserError(f"Error sending DTE to SII: {e}")
+
+    def action_check_sii_status(self):
+        """Check the status of the DTE in SII."""
+        self.ensure_one()
+        if not self.l10n_cl_sii_track_id:
+            raise UserError("No SII Track ID found.")
+
+        # Consultar estado en SII
+        try:
+            response = self._get_send_status(
+                self.env.company.l10n_cl_dte_service_provider,
+                self.l10n_cl_sii_track_id,
+                self.env.company.vat,
+                self.env.company._get_digital_signature(self.env.user.id)
+            )
+            self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
+            if self.l10n_cl_dte_status == 'accepted':
+                self.state = 'accepted'
+        except Exception as e:
+            raise UserError(f"Error checking SII status: {e}")
+
+    def _send_xml_to_sii(self, provider, vat, xml_file, signature):
+        """Enviar el archivo XML al SII."""
+        # Implementar la llamada al web service del SII usando utilidades de `l10n_cl_edi_util`.
+        pass
+
+    def _get_send_status(self, provider, track_id, vat, signature):
+        """Obtener el estado del documento en SII."""
+        # Implementar la lógica para obtener estado desde el SII.
+        pass
+
 
     # def parse_xml(self, xml_content):
     #     """Parse XML content and extract DTE data."""
