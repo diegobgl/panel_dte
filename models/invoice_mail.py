@@ -264,6 +264,35 @@ class InvoiceMail(models.Model):
         # Implementar la lógica para obtener estado desde el SII.
         pass
 
+    def _query_sii_status(self, emitter_rut, folio_number, doc_type_code, signature):
+        """
+        Consulta el estado del DTE en el SII basado en el folio, el RUT del emisor y el tipo de documento.
+        """
+        try:
+            # Lógica para enviar la solicitud al web service del SII
+            # Esto puede variar según el proveedor y el formato del XML/JSON requerido por el SII.
+
+            # Ejemplo: Generar la solicitud (XML o JSON)
+            request_data = {
+                'RUTEmisor': emitter_rut,
+                'Folio': folio_number,
+                'TipoDocumento': doc_type_code,
+            }
+
+            # Simulación del envío y respuesta
+            response = self.env['l10n_cl_edi.util'].send_status_request(
+                provider=self.env.company.l10n_cl_dte_service_provider,
+                data=request_data,
+                signature=signature
+            )
+
+            # Verifica y retorna la respuesta
+            if not response or 'STATUS' not in response:
+                raise UserError("No se pudo obtener el estado del DTE en el SII.")
+            return response
+
+        except Exception as e:
+            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
     # def parse_xml(self, xml_content):
     #     """Parse XML content and extract DTE data."""
