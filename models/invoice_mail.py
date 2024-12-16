@@ -26,12 +26,6 @@ class InvoiceMail(models.Model):
     xml_file = fields.Binary(string='Archivo XML', attachment=True)
     pdf_preview = fields.Binary(string='Previsualización PDF', attachment=True)
     line_ids = fields.One2many('invoice.mail.line', 'invoice_id', string='Detalle de Productos')
-    state = fields.Selection([
-        ('draft', 'Draft'),
-        ('sent', 'Sent'),
-        ('accepted', 'Accepted'),
-        ('rejected', 'Rejected'),
-    ], default='draft', string='Status', tracking=True)
     l10n_cl_reference_ids = fields.One2many(
         'invoice.mail.reference', 'invoice_mail_id', string="References")
     currency_id = fields.Many2one(
@@ -133,8 +127,8 @@ class InvoiceMail(models.Model):
                 'amount_total': float(monto_total),
                 'amount_net': float(monto_neto),
                 'amount_tax': float(iva),
-                'folio': folio,
-                'dte_type': tipo_dte,
+                'folio_number': folio,
+                'document_type': tipo_dte,
                 'xml_file': base64.b64encode(xml_file),
                 'pdf_preview': base64.b64encode(pdf_file) if pdf_file else False,
             })
