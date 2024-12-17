@@ -260,8 +260,8 @@ class InvoiceMail(models.Model):
         self.ensure_one()
 
         # Validación de valores requeridos
-        if not self.folio_number or not self.company_rut or not self.document_type:
-            raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos.")
+        if not self.folio_number or not self.company_rut or not self.document_type or not self.date_emission or not self.amount_total:
+            raise UserError("El número de folio, RUT del emisor, tipo de documento, fecha de emisión y monto total son requeridos.")
 
         try:
             # Obtener certificado activo
@@ -271,18 +271,23 @@ class InvoiceMail(models.Model):
             company_vat = self.company_rut
             document_type_code = self.document_type.code
             document_number = self.folio_number
+            date_emission = self.date_emission
+            amount_total = self.amount_total
 
             # Realizar la solicitud al SII
             response = self._get_dte_claim(
                 company_vat=company_vat,
-                digital_signature=certificate,
+                digital_signature=certificate.certificate,
                 document_type_code=document_type_code,
-                document_number=document_number
+                document_number=document_number,
+                date_emission=date_emission,
+                amount_total=amount_total
             )
 
-            # Actualizar estado
-            if response:
-                self.l10n_cl_dte_status = 'accepted' if 'ACEPTADO' in response else 'rejected'
+            # Procesar respuesta
+            self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
+            if self.l10n_cl_dte_status == 'accepted':
+                self.state = 'accepted'
 
             # Log en el chatter
             self.message_post(
@@ -292,6 +297,7 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
