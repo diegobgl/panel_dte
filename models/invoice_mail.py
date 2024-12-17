@@ -205,51 +205,51 @@ class InvoiceMail(models.Model):
         return certificate
 
     
-    def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number):
-        """Enviar solicitud de estado del DTE al SII en ambiente de producción."""
+    def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
+        """Consultar estado del DTE en SII."""
         try:
-            # Validar que todos los valores requeridos estén presentes
-            if not all([company_vat, digital_signature, document_type_code, document_number]):
+            # Validación de parámetros
+            if not all([company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total]):
                 raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
 
-            # URL fija para producción
-            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"  # Ambiente de producción
+            # URL del servicio
+            wsdl_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"
 
-            # Dividir el RUT en rutEmisor y dvEmisor
+            # Separar RUT y dígito verificador
             rut_emisor = company_vat[:-2]
             dv_emisor = company_vat[-1]
+            rut_receptor = self.partner_rut[:-2]
+            dv_receptor = self.partner_rut[-1]
+            rut_consultante = company_vat[:-2]
+            dv_consultante = company_vat[-1]
 
-            # Crear el payload con los nombres correctos
-            payload = {
-                'rutEmisor': rut_emisor,           # Parte numérica del RUT
-                'dvEmisor': dv_emisor,             # Dígito verificador
-                'tipoDoc': str(document_type_code),  # Código del tipo de documento
-                'folio': str(document_number)      # Número de folio
-            }
+            # Obtener el token usando el certificado activo
+            token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
 
-            # Encabezados de la solicitud
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            # Configurar el cliente SOAP
+            settings = Settings(strict=False, xml_huge_tree=True)
+            client = Client(wsdl=wsdl_url, settings=settings)
 
-            # Realizar la solicitud POST al SII
-            response = requests.post(url, json=payload, headers=headers)
-            response.raise_for_status()
+            # Llamada al servicio SOAP
+            response = client.service.getEstDte(
+                RutConsultante=rut_consultante,
+                DvConsultante=dv_consultante,
+                RutCompania=rut_emisor,
+                DvCompania=dv_emisor,
+                RutReceptor=rut_receptor,
+                DvReceptor=dv_receptor,
+                TipoDte=str(document_type_code),
+                FolioDte=str(document_number),
+                FechaEmisionDte=date_emission.strftime('%Y-%m-%d'),
+                MontoDte=str(int(amount_total)),
+                Token=token
+            )
 
-            # Procesar la respuesta JSON
-            response_json = response.json()
-            if 'STATUS' not in response_json:
-                raise UserError("Respuesta inválida del SII.")
+            return response
 
-            return response_json
-
-        except requests.exceptions.RequestException as e:
-            raise UserError(f"Error en la conexión con el SII: {e}")
-        except ValueError:
-            raise UserError("La respuesta del SII no contiene datos válidos.")
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
