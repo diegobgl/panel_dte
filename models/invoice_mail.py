@@ -5,6 +5,7 @@ from odoo.tools import email_split
 from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
+import logging
 
 
 
@@ -204,7 +205,8 @@ class InvoiceMail(models.Model):
             raise UserError("No se encontró un certificado digital activo en el sistema.")
         return certificate
 
-    
+    _logger = logging.getLogger(__name__)
+
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
         """Consultar estado del DTE en SII."""
         try:
@@ -254,6 +256,7 @@ class InvoiceMail(models.Model):
 
 
 
+    _logger = logging.getLogger(__name__)
 
     def check_sii_status(self):
         """Consultar el estado del DTE en el SII."""
