@@ -303,6 +303,7 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
 
+
     # def parse_xml(self, xml_content):
     #     """Parse XML content and extract DTE data."""
     #     ns = {'sii': 'http://www.sii.cl/SiiDte'}
