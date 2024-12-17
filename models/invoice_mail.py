@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 
 class InvoiceMail(models.Model):
     _name = 'invoice.mail'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'l10n_cl.edi.util']
     _description = 'Imported Electronic Invoices'
 
     name = fields.Char(string='Document Name', required=True)
