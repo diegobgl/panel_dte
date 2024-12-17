@@ -1,4 +1,5 @@
 import requests
+import zeep
 from odoo import models, fields, api
 from odoo.tools import email_split
 from odoo.exceptions import UserError
