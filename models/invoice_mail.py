@@ -248,6 +248,7 @@ class InvoiceMail(models.Model):
         except requests.exceptions.RequestException as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {str(e)}")
 
+
     def action_check_sii_status(self):
         """
         Consulta el estado del DTE en el SII.
