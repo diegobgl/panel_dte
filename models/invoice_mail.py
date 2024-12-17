@@ -258,17 +258,24 @@ class InvoiceMail(models.Model):
         """Check the status of the DTE in SII."""
         self.ensure_one()
 
-        # Verificación de valores requeridos en el modelo
+        # Verificación de valores en el modelo
         if not self.folio_number or not self.company_rut or not self.document_type:
             raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos para consultar el estado.")
 
-        # Obtener valores relacionados con la compañía
-        company = self.env.company  # Compañía actual
+        # Buscar el certificado activo relacionado a la compañía
+        company = self.env.company
+        certificate = self.env['l10n_cl.certificate'].search([
+            ('company_id', '=', company.id),
+            ('active', '=', True)
+        ], limit=1)
 
-        # Obtener directamente el certificado digital en base64 desde la compañía
-        digital_signature = company.l10n_cl_certificate_id.certificate_data
+        if not certificate:
+            raise UserError("No se encontró un certificado digital activo para la compañía.")
+
+        # Extraer el contenido de la firma digital en texto o base64
+        digital_signature = certificate.certificate_data
         if not digital_signature:
-            raise UserError("No se encontró un certificado digital válido en la compañía.")
+            raise UserError("El certificado digital no tiene datos válidos.")
 
         # Asignación de parámetros requeridos para la llamada
         provider = company.l10n_cl_dte_service_provider
@@ -281,7 +288,7 @@ class InvoiceMail(models.Model):
             response = self._get_dte_claim(
                 provider=provider,
                 company_vat=company_vat,
-                digital_signature=digital_signature,  # Firma digital en base64
+                digital_signature=digital_signature,
                 document_type_code=document_type_code,
                 document_number=document_number
             )
@@ -301,8 +308,6 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
-
-
 
     # def parse_xml(self, xml_content):
     #     """Parse XML content and extract DTE data."""
