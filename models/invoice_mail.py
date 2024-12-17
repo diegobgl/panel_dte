@@ -1,6 +1,7 @@
 from odoo import models, fields, api
 from odoo.tools import email_split
 from odoo.exceptions import UserError
+import requests
 import base64
 import xml.etree.ElementTree as ET
 
