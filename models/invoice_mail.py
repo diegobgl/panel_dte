@@ -209,68 +209,70 @@ class InvoiceMail(models.Model):
     #     return True
     
     def _get_dte_claim(self, provider, company_vat, digital_signature, document_type_code, document_number):
-        """ Consulta el estado del DTE en el SII """
-        import requests
-
-        # Valida y selecciona la URL del servicio
-        if provider == 'SIIDEMO':
-            url = "https://ws2.sii.cl/WSREGISTRORECLAMODTECERT/registroreclamodteservice?wsdl"
-        elif provider == 'SIIPROD':
-            url = "https://ws1.sii.cl/WSREGISTRORECLAMODTE/registroreclamodteservice?wsdl"
-        else:
-            raise UserError("Proveedor de servicio no válido. Use SIIDEMO para pruebas o SIIPROD para producción.")
-
-        # Parametros de entrada para el WS
-        params = {
-            "rutEmisor": company_vat.split('-')[0],  # Solo el número del RUT
-            "dvEmisor": company_vat.split('-')[1],   # Dígito verificador
-            "tipoDoc": document_type_code,           # Código de documento (33, 34, 43, etc.)
-            "folio": document_number                 # Número de folio del documento
-        }
-
-        headers = {
-            "Content-Type": "application/xml",
-            "Authorization": f"Bearer {digital_signature}"  # Suponiendo autenticación con firma digital
-        }
-
+        """Enviar solicitud de estado del DTE al SII."""
         try:
-            # Realiza la petición al servicio
-            response = requests.post(url, json=params, headers=headers)
-            response.raise_for_status()  # Lanza excepción si hay un error en la respuesta HTTP
-
-            # Analiza la respuesta
-            response_data = response.json()
-            if response_data.get("codigoRespuesta") in ["1", "0"]:
-                return response_data  # Respuesta exitosa
-            else:
-                raise UserError(f"Error al consultar el estado del DTE: {response_data.get('descripcionRespuesta')}")
-
+            payload = {
+                'provider': provider,
+                'company_vat': company_vat,
+                'digital_signature': digital_signature,
+                'document_type_code': document_type_code,
+                'document_number': document_number,
+            }
+            response = requests.post('https://api.sii.cl/consulta_estado', json=payload)
+            response.raise_for_status()
+            return response.json()
         except requests.exceptions.RequestException as e:
-            raise UserError(f"Error al consultar el estado del DTE en el SII: {str(e)}")
+            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
     def action_check_sii_status(self):
-        """
-        Consulta el estado del DTE en el SII.
-        """
+        """Check the status of the DTE in SII."""
         self.ensure_one()
+
+        # Verificación de valores en el modelo
+        if not self.folio_number or not self.company_rut or not self.document_type:
+            raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos para consultar el estado.")
+
+        # Obtener valores relacionados con la compañía
+        company = self.env.company  # Compañía actual
+        digital_signature = company._get_digital_signature(self.env.user.id)
+
+        # Asignación de parámetros requeridos para la llamada
+        provider = company.l10n_cl_dte_service_provider
+        company_vat = company.vat  # RUT de la compañía emisor
+        document_type_code = self.document_type.code  # Código del tipo de documento
+        document_number = self.folio_number  # Número de folio
+
+        # Verificar que la firma digital exista
+        if not digital_signature:
+            raise UserError("No se encontró una firma digital válida para la compañía.")
+
+        # Llamada al método `_get_dte_claim`
         try:
-            response = self._get_dte_claim()
+            response = self._get_dte_claim(
+                provider=provider,
+                company_vat=company_vat,
+                digital_signature=digital_signature,
+                document_type_code=document_type_code,
+                document_number=document_number
+            )
 
-            # Aquí puedes analizar la respuesta del SII
-            sii_status = self._analyze_sii_result(response)  # Implementa este método para procesar la respuesta
-            self.l10n_cl_dte_status = sii_status
+            # Actualizar estado del SII
+            self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
 
-            # Cambia el estado según la respuesta
-            if sii_status == 'accepted':
+            # Actualizar estado en el modelo
+            if self.l10n_cl_dte_status == 'accepted':
                 self.state = 'accepted'
-            elif sii_status == 'rejected':
-                self.state = 'rejected'
-            else:
-                self.state = 'pending'
+
+            self.message_post(
+                body=f"Estado del DTE consultado: {self.l10n_cl_dte_status}",
+                subject="Consulta de Estado DTE",
+            )
 
         except Exception as e:
-            raise UserError(f"Error al consultar el estado en el SII: {e}")
+            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
