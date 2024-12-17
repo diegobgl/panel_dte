@@ -208,56 +208,45 @@ class InvoiceMail(models.Model):
     #         server.fetch_mail()
     #     return True
     
-    def _get_dte_claim(self):
-        """
-        Consulta el estado del DTE en el SII utilizando los datos del modelo actual.
-        """
-        self.ensure_one()  # Asegura que estamos trabajando con un único registro
+    def _get_dte_claim(self, provider, company_vat, digital_signature, document_type_code, document_number):
+        """ Consulta el estado del DTE en el SII """
+        import requests
 
-        # Verificar que los campos necesarios están presentes
-        if not self.company_rut:
-            raise UserError("El campo 'RUT Emisor' (company_rut) es obligatorio.")
-        if not self.folio_number:
-            raise UserError("El número de folio es obligatorio.")
-        if not self.document_type or not self.document_type.code:
-            raise UserError("El tipo de documento es obligatorio y debe tener un código válido.")
+        # Valida y selecciona la URL del servicio
+        if provider == 'SIIDEMO':
+            url = "https://ws2.sii.cl/WSREGISTRORECLAMODTECERT/registroreclamodteservice?wsdl"
+        elif provider == 'SIIPROD':
+            url = "https://ws1.sii.cl/WSREGISTRORECLAMODTE/registroreclamodteservice?wsdl"
+        else:
+            raise UserError("Proveedor de servicio no válido. Use SIIDEMO para pruebas o SIIPROD para producción.")
+
+        # Parametros de entrada para el WS
+        params = {
+            "rutEmisor": company_vat.split('-')[0],  # Solo el número del RUT
+            "dvEmisor": company_vat.split('-')[1],   # Dígito verificador
+            "tipoDoc": document_type_code,           # Código de documento (33, 34, 43, etc.)
+            "folio": document_number                 # Número de folio del documento
+        }
+
+        headers = {
+            "Content-Type": "application/xml",
+            "Authorization": f"Bearer {digital_signature}"  # Suponiendo autenticación con firma digital
+        }
 
         try:
-            # Determina el proveedor del servicio
-            provider = self.env.company.l10n_cl_dte_service_provider
+            # Realiza la petición al servicio
+            response = requests.post(url, json=params, headers=headers)
+            response.raise_for_status()  # Lanza excepción si hay un error en la respuesta HTTP
 
-            # Determina la URL del servicio según el proveedor
-            if provider == 'SIIDEMO':
-                url = "https://palabra.test.sii.cl/services/GetDteClaim"  # Ambiente de prueba
-            elif provider == 'SIIPROD':
-                url = "https://palabra.sii.cl/services/GetDteClaim"  # Ambiente de producción
+            # Analiza la respuesta
+            response_data = response.json()
+            if response_data.get("codigoRespuesta") in ["1", "0"]:
+                return response_data  # Respuesta exitosa
             else:
-                raise UserError("Proveedor de servicio no válido.")
-
-            # Define los encabezados de la solicitud
-            headers = {'Content-Type': 'application/xml; charset=utf-8'}
-
-            # Construye el cuerpo de la solicitud en XML
-            body = f"""
-            <sii:ConsultaEstadoDte xmlns:sii="http://www.sii.cl/SiiDte">
-                <RUTEmisor>{self.company_rut}</RUTEmisor>
-                <TipoDTE>{self.document_type.code}</TipoDTE>
-                <Folio>{self.folio_number}</Folio>
-                <Signature>{self.env.company._get_digital_signature(self.env.user.id)}</Signature>
-            </sii:ConsultaEstadoDte>
-            """
-
-            # Realiza la solicitud al servicio
-            response = requests.post(url, headers=headers, data=body)
-            response.raise_for_status()
-
-            # Devuelve el contenido de la respuesta
-            return response.content
+                raise UserError(f"Error al consultar el estado del DTE: {response_data.get('descripcionRespuesta')}")
 
         except requests.exceptions.RequestException as e:
-            raise UserError(f"Error de conexión con el SII: {e}")
-        except Exception as e:
-            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+            raise UserError(f"Error al consultar el estado del DTE en el SII: {str(e)}")
 
 
     def action_check_sii_status(self):
