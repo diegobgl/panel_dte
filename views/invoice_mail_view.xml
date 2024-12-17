@@ -36,7 +36,7 @@
         <field name="arch" type="xml">
             <form string="Factura Electrónica">
                 <header>
-                    <button name="action_check_sii_status" type="object" string="Check SII Status" class="btn-secondary"/>
+                    <button name="_check_sii_status" type="object" string="Check SII Status" class="btn-secondary"/>
                     <!-- Status Bar -->
                     <field name="l10n_cl_dte_status" widget="statusbar" statusbar_visible="not_sent,ask_for_status,accepted,rejected"/>
                 </header>
