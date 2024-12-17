@@ -204,21 +204,15 @@ class InvoiceMail(models.Model):
         return certificate
 
     
-    def _get_dte_claim(self, provider, company_vat, digital_signature, document_type_code, document_number):
-        """Enviar solicitud de estado del DTE al SII."""
+    def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number):
+        """Enviar solicitud de estado del DTE al SII en ambiente de producción."""
         try:
             # Validar que todos los valores requeridos estén presentes
-            if not all([provider, company_vat, digital_signature, document_type_code, document_number]):
+            if not all([company_vat, digital_signature, document_type_code, document_number]):
                 raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
 
-            # Definir URLs por ambiente
-            urls = {
-                'SIIDEMO': "https://palabra.test.sii.cl/services/GetDteClaim",
-                'SIIPROD': "https://palabra.sii.cl/services/GetDteClaim"
-            }
-            url = urls.get(provider)
-            if not url:
-                raise UserError("Proveedor de servicio no válido.")
+            # URL fija para producción
+            url = "https://palena.sii.cl/DTEWS/GetDteClaim.jws"  # Ambiente de producción
 
             # Crear el payload
             payload = {
@@ -251,7 +245,6 @@ class InvoiceMail(models.Model):
             raise UserError("La respuesta del SII no contiene datos válidos.")
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
-
 
 
 
