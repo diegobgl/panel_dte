@@ -213,7 +213,7 @@ class InvoiceMail(models.Model):
                 raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
 
             # URL fija para producción
-            url = "https://palena.sii.cl/DTEWS/GetDteClaim.jws"  # Ambiente de producción
+            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"  # Ambiente de producción
 
             # Dividir el RUT en rutEmisor y dvEmisor
             rut_emisor = company_vat[:-2]
