@@ -259,7 +259,6 @@ class InvoiceMail(models.Model):
         """Consultar el estado del DTE en el SII."""
         self.ensure_one()
 
-        # Validación de valores requeridos
         if not self.folio_number or not self.company_rut or not self.document_type:
             raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos.")
 
@@ -271,9 +270,11 @@ class InvoiceMail(models.Model):
             util = self.env['l10n_cl.edi.util']
             token = util._get_token('SII', certificate)
 
-            # Verificar si se obtuvo el token
             if not token:
                 raise UserError("No se pudo obtener un token válido desde el SII.")
+
+            # Log de solicitud de claim
+            _logger.info(f"Solicitando estado al SII con: RUT={self.company_rut}, TipoDoc={self.document_type.code}, Folio={self.folio_number}")
 
             # Parámetros para la solicitud
             response = util._get_dte_claim(
@@ -284,7 +285,9 @@ class InvoiceMail(models.Model):
                 document_number=self.folio_number,
             )
 
-            # Verificar si la respuesta es válida
+            # Loggear la respuesta cruda
+            _logger.info(f"Respuesta del SII: {response}")
+
             if not response:
                 raise UserError("No se recibió una respuesta válida del SII.")
 
@@ -300,8 +303,8 @@ class InvoiceMail(models.Model):
             )
 
         except Exception as e:
+            _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
-
 
 
 
