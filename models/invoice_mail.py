@@ -261,14 +261,12 @@ class InvoiceMail(models.Model):
             certificate = self._get_active_certificate()
 
             # Parámetros para la solicitud
-            provider = self.env.company.l10n_cl_dte_service_provider
             company_vat = self.company_rut
             document_type_code = self.document_type.code
             document_number = self.folio_number
 
             # Realizar la solicitud al SII
             response = self._get_dte_claim(
-                provider=provider,
                 company_vat=company_vat,
                 digital_signature=certificate.certificate,
                 document_type_code=document_type_code,
@@ -288,6 +286,7 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
