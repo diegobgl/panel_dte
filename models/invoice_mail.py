@@ -208,27 +208,49 @@ class InvoiceMail(models.Model):
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number):
         """Enviar solicitud de estado del DTE al SII en ambiente de producción."""
         try:
-            # URL fija para el servicio de reclamación en producción
-            url = "https://ws1.sii.cl/WSREGISTRORECLAMODTE/registroreclamodteservice?wsdl"
+            # Validar que todos los valores requeridos estén presentes
+            if not all([company_vat, digital_signature, document_type_code, document_number]):
+                raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
 
-            # Configuración del cliente SOAP
-            settings = zeep.Settings(strict=False, extra_http_headers={'Cookie': f"TOKEN={digital_signature.last_token}"})
-            client = zeep.Client(url, settings=settings)
+            # URL fija para producción
+            url = "https://palena.sii.cl/DTEWS/GetDteClaim.jws"  # Ambiente de producción
 
-            # Realizar la solicitud
-            response = client.service.listarEventosHistDoc(
-                rutEmisor=self._l10n_cl_format_vat(company_vat)[:-2],
-                dvEmisor=self._l10n_cl_format_vat(company_vat)[-1],
-                tipoDte=str(document_type_code),
-                folio=str(document_number),
-            )
+            # Dividir el RUT en rutEmisor y dvEmisor
+            rut_emisor = company_vat[:-2]
+            dv_emisor = company_vat[-1]
 
-            return response
+            # Crear el payload con los nombres correctos
+            payload = {
+                'rutEmisor': rut_emisor,           # Parte numérica del RUT
+                'dvEmisor': dv_emisor,             # Dígito verificador
+                'tipoDoc': str(document_type_code),  # Código del tipo de documento
+                'folio': str(document_number)      # Número de folio
+            }
 
-        except zeep.exceptions.Fault as e:
-            raise UserError(f"Error en la consulta SOAP al SII: {e}")
+            # Encabezados de la solicitud
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+
+            # Realizar la solicitud POST al SII
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+
+            # Procesar la respuesta JSON
+            response_json = response.json()
+            if 'STATUS' not in response_json:
+                raise UserError("Respuesta inválida del SII.")
+
+            return response_json
+
+        except requests.exceptions.RequestException as e:
+            raise UserError(f"Error en la conexión con el SII: {e}")
+        except ValueError:
+            raise UserError("La respuesta del SII no contiene datos válidos.")
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
