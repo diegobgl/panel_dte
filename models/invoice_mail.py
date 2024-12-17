@@ -195,18 +195,14 @@ class InvoiceMail(models.Model):
         self.state = 'rejected'
 
 
-    # @api.model
-    # def fetch_emails(self):
-    #     """Fetch emails from the configured server and process them."""
-    #     # Obtener servidores de correo configurados
-    #     mail_servers = self.env['fetchmail.server'].search([('state', '=', 'connected')])
-    #     if not mail_servers:
-    #         raise UserError("No mail servers are connected. Please check the configuration.")
 
-    #     for server in mail_servers:
-    #         # Procesar correos para el servidor actual
-    #         server.fetch_mail()
-    #     return True
+    def _get_active_certificate(self):
+        """Devuelve el certificado activo o lanza una excepción."""
+        certificate = self.env['l10n_cl.certificate'].search([], limit=1)
+        if not certificate:
+            raise UserError("No se encontró un certificado digital activo en el sistema.")
+        return certificate
+
     
     def _get_dte_claim(self, provider, company_vat, digital_signature, document_type_code, document_number):
         """Enviar solicitud de estado del DTE al SII."""
@@ -215,17 +211,22 @@ class InvoiceMail(models.Model):
             if not all([provider, company_vat, digital_signature, document_type_code, document_number]):
                 raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
 
-            # Crear el payload de la solicitud
+            # Definir URLs por ambiente
+            urls = {
+                'SIIDEMO': "https://palabra.test.sii.cl/services/GetDteClaim",
+                'SIIPROD': "https://palabra.sii.cl/services/GetDteClaim"
+            }
+            url = urls.get(provider)
+            if not url:
+                raise UserError("Proveedor de servicio no válido.")
+
+            # Crear el payload
             payload = {
-                'provider': provider,
                 'company_vat': company_vat,
                 'digital_signature': digital_signature,
                 'document_type_code': document_type_code,
-                'document_number': document_number,
+                'document_number': document_number
             }
-
-            # URL de ejemplo del SII (debe ser reemplazada con la URL real)
-            url = "https://api.sii.cl/consulta_estado"
 
             # Encabezados de la solicitud
             headers = {
@@ -237,10 +238,10 @@ class InvoiceMail(models.Model):
             response = requests.post(url, json=payload, headers=headers)
             response.raise_for_status()
 
-            # Parsear la respuesta JSON
+            # Procesar la respuesta JSON
             response_json = response.json()
-            if response_json.get('STATUS') not in ['accepted', 'rejected', 'pending']:
-                raise UserError(f"El estado del DTE es desconocido: {response_json}")
+            if 'STATUS' not in response_json:
+                raise UserError("Respuesta inválida del SII.")
 
             return response_json
 
@@ -255,52 +256,38 @@ class InvoiceMail(models.Model):
 
 
     def check_sii_status(self):
-        """Check the status of the DTE in SII."""
+        """Consultar el estado del DTE en el SII."""
         self.ensure_one()
 
-        # Verificación de valores en el modelo
+        # Validación de valores requeridos
         if not self.folio_number or not self.company_rut or not self.document_type:
-            raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos para consultar el estado.")
+            raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos.")
 
-        # Buscar el certificado activo relacionado a la compañía
-        company = self.env.company
-        certificate = self.env['l10n_cl.certificate'].search([
-            ('company_id', '=', company.id),
-            ('active', '=', True)
-        ], limit=1)
-
-        if not certificate:
-            raise UserError("No se encontró un certificado digital activo para la compañía.")
-
-        # Extraer el contenido de la firma digital en texto o base64
-        digital_signature = certificate.certificate_data
-        if not digital_signature:
-            raise UserError("El certificado digital no tiene datos válidos.")
-
-        # Asignación de parámetros requeridos para la llamada
-        provider = company.l10n_cl_dte_service_provider
-        company_vat = company.vat  # RUT de la compañía emisora
-        document_type_code = self.document_type.code  # Código del tipo de documento
-        document_number = self.folio_number  # Número de folio
-
-        # Llamada al método `_get_dte_claim`
         try:
+            # Obtener certificado activo
+            certificate = self._get_active_certificate()
+
+            # Parámetros para la solicitud
+            provider = self.env.company.l10n_cl_dte_service_provider
+            company_vat = self.company_rut
+            document_type_code = self.document_type.code
+            document_number = self.folio_number
+
+            # Realizar la solicitud al SII
             response = self._get_dte_claim(
                 provider=provider,
                 company_vat=company_vat,
-                digital_signature=digital_signature,
+                digital_signature=certificate.certificate,
                 document_type_code=document_type_code,
                 document_number=document_number
             )
 
-            # Actualizar estado del SII
+            # Actualizar estado
             self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
-
-            # Actualizar estado en el modelo si el documento es aceptado
             if self.l10n_cl_dte_status == 'accepted':
                 self.state = 'accepted'
 
-            # Registrar el mensaje en el chatter
+            # Log en el chatter
             self.message_post(
                 body=f"Estado del DTE consultado: {self.l10n_cl_dte_status}",
                 subject="Consulta de Estado DTE",
@@ -309,66 +296,8 @@ class InvoiceMail(models.Model):
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
-    # def parse_xml(self, xml_content):
-    #     """Parse XML content and extract DTE data."""
-    #     ns = {'sii': 'http://www.sii.cl/SiiDte'}
-    #     try:
-    #         root = ET.fromstring(xml_content)
-    #         documento = root.find('.//sii:Documento', ns)
-    #         if not documento:
-    #             raise UserError("No se encontró un documento válido en el XML.")
 
-    #         encabezado = documento.find('.//sii:Encabezado', ns)
 
-    #         # Extraer datos del encabezado
-    #         tipo_dte = encabezado.find('.//sii:IdDoc/sii:TipoDTE', ns).text
-    #         folio = encabezado.find('.//sii:IdDoc/sii:Folio', ns).text
-    #         fecha_emision = encabezado.find('.//sii:IdDoc/sii:FchEmis', ns).text
-    #         monto_total = encabezado.find('.//sii:Totales/sii:MntTotal', ns).text
-    #         monto_neto = encabezado.find('.//sii:Totales/sii:MntNeto', ns).text
-    #         iva = encabezado.find('.//sii:Totales/sii:IVA', ns).text
-    #         rut_emisor = encabezado.find('.//sii:Emisor/sii:RUTEmisor', ns).text
-    #         razon_social_emisor = encabezado.find('.//sii:Emisor/sii:RznSoc', ns).text
-    #         rut_receptor = encabezado.find('.//sii:Receptor/sii:RUTRecep', ns).text
-    #         razon_social_receptor = encabezado.find('.//sii:Receptor/sii:RznSocRecep', ns).text
-
-    #         # Crear el registro de la factura
-    #         invoice = self.create({
-    #             'name': f'DTE {tipo_dte}-{folio}',
-    #             'company_rut': rut_emisor,
-    #             'company_name': razon_social_emisor,
-    #             'partner_rut': rut_receptor,
-    #             'partner_name': razon_social_receptor,
-    #             'date_emission': fecha_emision,
-    #             'amount_total': float(monto_total),
-    #             'amount_net': float(monto_neto),
-    #             'amount_tax': float(iva),
-    #         })
-
-    #         # Extraer los detalles de productos/servicios
-    #         detalles = documento.findall('.//sii:Detalle', ns)
-    #         if not detalles:
-    #             raise UserError("No se encontraron detalles de productos en el XML.")
-
-    #         for detalle in detalles:
-    #             nombre_item = detalle.find('.//sii:NmbItem', ns)
-    #             cantidad_item = detalle.find('.//sii:QtyItem', ns)
-    #             precio_item = detalle.find('.//sii:PrcItem', ns)
-
-    #             # Crear las líneas de productos solo si todos los datos están presentes
-    #             if nombre_item is not None and cantidad_item is not None and precio_item is not None:
-    #                 self.env['invoice.mail.line'].create({
-    #                     'invoice_id': invoice.id,
-    #                     'product_name': nombre_item.text,
-    #                     'quantity': float(cantidad_item.text),
-    #                     'price_unit': float(precio_item.text),
-    #                 })
-
-    #         return invoice
-    #     except ET.ParseError as e:
-    #         raise UserError(f"Error al analizar el XML: {e}")
-    #     except Exception as e:
-    #         raise UserError(f"Error procesando el XML: {e}")
 
 
 class InvoiceMailLine(models.Model):
