@@ -211,6 +211,11 @@ class InvoiceMail(models.Model):
     def _get_dte_claim(self, provider, company_vat, digital_signature, document_type_code, document_number):
         """Enviar solicitud de estado del DTE al SII."""
         try:
+            # Validar que todos los valores requeridos estén presentes
+            if not all([provider, company_vat, digital_signature, document_type_code, document_number]):
+                raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
+
+            # Crear el payload de la solicitud
             payload = {
                 'provider': provider,
                 'company_vat': company_vat,
@@ -218,15 +223,38 @@ class InvoiceMail(models.Model):
                 'document_type_code': document_type_code,
                 'document_number': document_number,
             }
-            response = requests.post('https://api.sii.cl/consulta_estado', json=payload)
+
+            # URL de ejemplo del SII (debe ser reemplazada con la URL real)
+            url = "https://api.sii.cl/consulta_estado"
+
+            # Encabezados de la solicitud
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+
+            # Realizar la solicitud POST al SII
+            response = requests.post(url, json=payload, headers=headers)
             response.raise_for_status()
-            return response.json()
+
+            # Parsear la respuesta JSON
+            response_json = response.json()
+            if response_json.get('STATUS') not in ['accepted', 'rejected', 'pending']:
+                raise UserError(f"El estado del DTE es desconocido: {response_json}")
+
+            return response_json
+
         except requests.exceptions.RequestException as e:
+            raise UserError(f"Error en la conexión con el SII: {e}")
+        except ValueError:
+            raise UserError("La respuesta del SII no contiene datos válidos.")
+        except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
 
 
-    def action_check_sii_status(self):
+
+    def _check_sii_status(self):
         """Check the status of the DTE in SII."""
         self.ensure_one()
 
@@ -236,24 +264,29 @@ class InvoiceMail(models.Model):
 
         # Obtener valores relacionados con la compañía
         company = self.env.company  # Compañía actual
-        digital_signature = company._get_digital_signature(self.env.user.id)
+
+        # Obtener firma digital en formato serializable
+        digital_signature_obj = company._get_digital_signature(self.env.user.id)
+        if not digital_signature_obj:
+            raise UserError("No se encontró una firma digital válida para la compañía.")
+
+        # Extraer el contenido de la firma digital en texto o base64
+        digital_signature = getattr(digital_signature_obj, 'certificate_data', None)  # Ajustar si el campo tiene otro nombre
+        if not digital_signature:
+            raise UserError("El certificado digital no tiene datos válidos.")
 
         # Asignación de parámetros requeridos para la llamada
         provider = company.l10n_cl_dte_service_provider
-        company_vat = company.vat  # RUT de la compañía emisor
+        company_vat = company.vat  # RUT de la compañía emisora
         document_type_code = self.document_type.code  # Código del tipo de documento
         document_number = self.folio_number  # Número de folio
-
-        # Verificar que la firma digital exista
-        if not digital_signature:
-            raise UserError("No se encontró una firma digital válida para la compañía.")
 
         # Llamada al método `_get_dte_claim`
         try:
             response = self._get_dte_claim(
                 provider=provider,
                 company_vat=company_vat,
-                digital_signature=digital_signature,
+                digital_signature=digital_signature,  # Firma digital en base64 o texto
                 document_type_code=document_type_code,
                 document_number=document_number
             )
@@ -261,10 +294,11 @@ class InvoiceMail(models.Model):
             # Actualizar estado del SII
             self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
 
-            # Actualizar estado en el modelo
+            # Actualizar estado en el modelo si el documento es aceptado
             if self.l10n_cl_dte_status == 'accepted':
                 self.state = 'accepted'
 
+            # Registrar el mensaje en el chatter
             self.message_post(
                 body=f"Estado del DTE consultado: {self.l10n_cl_dte_status}",
                 subject="Consulta de Estado DTE",
@@ -272,7 +306,6 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
-
 
 
 
