@@ -271,6 +271,10 @@ class InvoiceMail(models.Model):
             util = self.env['l10n_cl.edi.util']
             token = util._get_token('SII', certificate)
 
+            # Verificar si se obtuvo el token
+            if not token:
+                raise UserError("No se pudo obtener un token válido desde el SII.")
+
             # Parámetros para la solicitud
             response = util._get_dte_claim(
                 mode='SII',
@@ -279,6 +283,10 @@ class InvoiceMail(models.Model):
                 document_type_code=self.document_type.code,
                 document_number=self.folio_number,
             )
+
+            # Verificar si la respuesta es válida
+            if not response:
+                raise UserError("No se recibió una respuesta válida del SII.")
 
             # Actualizar estado
             self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
@@ -293,6 +301,7 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
