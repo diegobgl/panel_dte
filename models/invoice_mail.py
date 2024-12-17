@@ -254,7 +254,7 @@ class InvoiceMail(models.Model):
 
 
 
-    def _check_sii_status(self):
+    def check_sii_status(self):
         """Check the status of the DTE in SII."""
         self.ensure_one()
 
@@ -271,7 +271,7 @@ class InvoiceMail(models.Model):
             raise UserError("No se encontró una firma digital válida para la compañía.")
 
         # Extraer el contenido de la firma digital en texto o base64
-        digital_signature = getattr(digital_signature_obj, 'certificate_data', None)  # Ajustar si el campo tiene otro nombre
+        digital_signature = getattr(digital_signature_obj, 'certificate_data', None)
         if not digital_signature:
             raise UserError("El certificado digital no tiene datos válidos.")
 
@@ -286,7 +286,7 @@ class InvoiceMail(models.Model):
             response = self._get_dte_claim(
                 provider=provider,
                 company_vat=company_vat,
-                digital_signature=digital_signature,  # Firma digital en base64 o texto
+                digital_signature=digital_signature,
                 document_type_code=document_type_code,
                 document_number=document_number
             )
