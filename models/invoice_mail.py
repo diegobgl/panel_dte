@@ -207,44 +207,28 @@ class InvoiceMail(models.Model):
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number):
         """Enviar solicitud de estado del DTE al SII en ambiente de producción."""
         try:
-            # Validar que todos los valores requeridos estén presentes
-            if not all([company_vat, digital_signature, document_type_code, document_number]):
-                raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
+            # URL fija para el servicio de reclamación en producción
+            url = "https://ws1.sii.cl/WSREGISTRORECLAMODTE/registroreclamodteservice?wsdl"
 
-            # URL fija para producción
-            url = "https://palena.sii.cl/DTEWS/GetDteClaim.jws"  # Ambiente de producción
+            # Configuración del cliente SOAP
+            settings = zeep.Settings(strict=False, extra_http_headers={'Cookie': f"TOKEN={digital_signature.last_token}"})
+            client = zeep.Client(url, settings=settings)
 
-            # Crear el payload
-            payload = {
-                'company_vat': company_vat,
-                'digital_signature': digital_signature,
-                'document_type_code': document_type_code,
-                'document_number': document_number
-            }
+            # Realizar la solicitud
+            response = client.service.listarEventosHistDoc(
+                rutEmisor=self._l10n_cl_format_vat(company_vat)[:-2],
+                dvEmisor=self._l10n_cl_format_vat(company_vat)[-1],
+                tipoDte=str(document_type_code),
+                folio=str(document_number),
+            )
 
-            # Encabezados de la solicitud
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            return response
 
-            # Realizar la solicitud POST al SII
-            response = requests.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-
-            # Procesar la respuesta JSON
-            response_json = response.json()
-            if 'STATUS' not in response_json:
-                raise UserError("Respuesta inválida del SII.")
-
-            return response_json
-
-        except requests.exceptions.RequestException as e:
-            raise UserError(f"Error en la conexión con el SII: {e}")
-        except ValueError:
-            raise UserError("La respuesta del SII no contiene datos válidos.")
+        except zeep.exceptions.Fault as e:
+            raise UserError(f"Error en la consulta SOAP al SII: {e}")
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
@@ -268,15 +252,14 @@ class InvoiceMail(models.Model):
             # Realizar la solicitud al SII
             response = self._get_dte_claim(
                 company_vat=company_vat,
-                digital_signature=certificate.certificate,
+                digital_signature=certificate,
                 document_type_code=document_type_code,
                 document_number=document_number
             )
 
             # Actualizar estado
-            self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
-            if self.l10n_cl_dte_status == 'accepted':
-                self.state = 'accepted'
+            if response:
+                self.l10n_cl_dte_status = 'accepted' if 'ACEPTADO' in response else 'rejected'
 
             # Log en el chatter
             self.message_post(
@@ -286,6 +269,7 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
