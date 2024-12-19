@@ -220,6 +220,21 @@ class InvoiceMail(models.Model):
             rut_emisor = company_vat[:-2]
             dv_emisor = company_vat[-1]
 
+            _logger.info("Enviando solicitud al SII con los siguientes parámetros:")
+            _logger.info({
+                "RutConsultante": rut_emisor,
+                "DvConsultante": dv_emisor,
+                "RutCompania": rut_emisor,
+                "DvCompania": dv_emisor,
+                "RutReceptor": self.partner_rut[:-2],
+                "DvReceptor": self.partner_rut[-1],
+                "TipoDte": str(document_type_code),
+                "FolioDte": str(document_number),
+                "FechaEmisionDte": date_emission.strftime('%Y-%m-%d'),
+                "MontoDte": str(int(amount_total)),
+                "Token": token,
+            })
+
             response = client.service.getEstDte(
                 RutConsultante=rut_emisor,
                 DvConsultante=dv_emisor,
@@ -237,8 +252,14 @@ class InvoiceMail(models.Model):
             _logger.info(f"Respuesta completa del SII: {response}")
             return response
 
+        except zeep.exceptions.Fault as fault:
+            _logger.error(f"Error de SOAP al consultar el estado del DTE: {fault}")
+            raise UserError(f"Error de SOAP al consultar el estado del DTE: {fault}")
+        except requests.exceptions.RequestException as req_error:
+            _logger.error(f"Error de conexión al SII: {req_error}")
+            raise UserError(f"Error de conexión al SII: {req_error}")
         except Exception as e:
-            _logger.error(f"Error al consultar el estado del DTE: {e}")
+            _logger.error(f"Error general al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
 
