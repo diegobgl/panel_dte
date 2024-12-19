@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 import logging
 
 
-
+_logger = logging.getLogger(__name__)
 
 class InvoiceMail(models.Model):
     _name = 'invoice.mail'
@@ -205,7 +205,6 @@ class InvoiceMail(models.Model):
             raise UserError("No se encontró un certificado digital activo en el sistema.")
         return certificate
 
-    _logger = logging.getLogger(__name__)
 
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
         """Consultar estado del DTE en SII."""
@@ -254,9 +253,6 @@ class InvoiceMail(models.Model):
 
 
 
-
-
-    _logger = logging.getLogger(__name__)
 
     def check_sii_status(self):
         """Consultar el estado del DTE en el SII."""
@@ -308,10 +304,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
-
-
-
-
 
 
 
