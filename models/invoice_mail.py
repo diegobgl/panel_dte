@@ -9,7 +9,6 @@ from odoo import logging
 
 
 _logger = logging.getLogger(__name__)
-
 class InvoiceMail(models.Model):
     _name = 'invoice.mail'
     _inherit = ['mail.thread', 'mail.activity.mixin', 'l10n_cl.edi.util']
