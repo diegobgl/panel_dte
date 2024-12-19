@@ -208,36 +208,25 @@ class InvoiceMail(models.Model):
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
         """Consultar estado del DTE en SII."""
         try:
-            # Validación de parámetros
             if not all([company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total]):
                 raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
 
-            # URL del servicio
             wsdl_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"
-
-            # Separar RUT y dígito verificador
-            rut_emisor = company_vat[:-2]
-            dv_emisor = company_vat[-1]
-            rut_receptor = self.partner_rut[:-2]
-            dv_receptor = self.partner_rut[-1]
-            rut_consultante = company_vat[:-2]
-            dv_consultante = company_vat[-1]
-
-            # Obtener el token usando el certificado activo
             token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
 
-            # Configurar el cliente SOAP
-            settings = Settings(strict=False, xml_huge_tree=True)
-            client = Client(wsdl=wsdl_url, settings=settings)
+            settings = zeep.Settings(strict=False, xml_huge_tree=True)
+            client = zeep.Client(wsdl=wsdl_url, settings=settings)
 
-            # Llamada al servicio SOAP
+            rut_emisor = company_vat[:-2]
+            dv_emisor = company_vat[-1]
+
             response = client.service.getEstDte(
-                RutConsultante=rut_consultante,
-                DvConsultante=dv_consultante,
+                RutConsultante=rut_emisor,
+                DvConsultante=dv_emisor,
                 RutCompania=rut_emisor,
                 DvCompania=dv_emisor,
-                RutReceptor=rut_receptor,
-                DvReceptor=dv_receptor,
+                RutReceptor=self.partner_rut[:-2],
+                DvReceptor=self.partner_rut[-1],
                 TipoDte=str(document_type_code),
                 FolioDte=str(document_number),
                 FechaEmisionDte=date_emission.strftime('%Y-%m-%d'),
@@ -245,10 +234,14 @@ class InvoiceMail(models.Model):
                 Token=token
             )
 
+            _logger.info(f"Respuesta completa del SII: {response}")
             return response
 
         except Exception as e:
+            _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
+
 
 
 
@@ -261,47 +254,42 @@ class InvoiceMail(models.Model):
             raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos.")
 
         try:
-            # Obtener certificado activo
             certificate = self._get_active_certificate()
 
-            # Validar token y obtenerlo si no existe
-            util = self.env['l10n_cl.edi.util']
-            token = util._get_token('SII', certificate)
-
-            if not token:
-                raise UserError("No se pudo obtener un token válido desde el SII.")
-
-            # Log de solicitud de claim
             _logger.info(f"Solicitando estado al SII con: RUT={self.company_rut}, TipoDoc={self.document_type.code}, Folio={self.folio_number}")
 
-            # Parámetros para la solicitud
-            response = util._get_dte_claim(
-                mode='SII',
+            response = self._get_dte_claim(
                 company_vat=self.company_rut,
                 digital_signature=certificate,
                 document_type_code=self.document_type.code,
                 document_number=self.folio_number,
+                date_emission=self.date_emission,
+                amount_total=self.amount_total
             )
 
-            # Loggear la respuesta cruda
-            _logger.info(f"Respuesta del SII: {response}")
-
             if not response:
+                _logger.warning(f"No se recibió una respuesta válida del SII. Respuesta: {response}")
+                self.message_post(
+                    body="No se recibió una respuesta válida del SII.",
+                    subject="Consulta de Estado DTE",
+                )
                 raise UserError("No se recibió una respuesta válida del SII.")
 
-            # Actualizar estado
+            # Procesar la respuesta si es válida
             self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
+            _logger.info(f"Estado del DTE obtenido: {self.l10n_cl_dte_status}")
+            
             if self.l10n_cl_dte_status == 'accepted':
                 self.state = 'accepted'
 
             # Log en el chatter
             self.message_post(
-                body=f"Estado del DTE consultado: {self.l10n_cl_dte_status}",
+                body=f"Estado del DTE consultado: {self.l10n_cl_dte_status}. Respuesta del SII: {response}",
                 subject="Consulta de Estado DTE",
             )
 
         except Exception as e:
-            _logger.error(f"Error al consultar el estado del DTE: {e}")
+            _logger.error(f"Error en check_sii_status: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
 
