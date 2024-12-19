@@ -5,7 +5,7 @@ from odoo.tools import email_split
 from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
-import logging
+from odoo import logging
 
 
 _logger = logging.getLogger(__name__)
