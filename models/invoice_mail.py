@@ -270,8 +270,6 @@ class InvoiceMail(models.Model):
 
 
 
-
-
     def check_sii_status(self):
         """Consultar el estado del DTE en el SII."""
         self.ensure_one()
