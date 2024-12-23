@@ -280,10 +280,20 @@ class InvoiceMail(models.Model):
             raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos.")
 
         try:
+            # Obtener certificado activo
             certificate = self._get_active_certificate()
 
+            # Validar token y obtenerlo si no existe
+            util = self.env['l10n_cl.edi.util']
+            token = util._get_token('SII', certificate)
+
+            if not token:
+                raise UserError("No se pudo obtener un token válido desde el SII.")
+
+            # Log de solicitud de claim
             _logger.info(f"Solicitando estado al SII con: RUT={self.company_rut}, TipoDoc={self.document_type.code}, Folio={self.folio_number}")
 
+            # Parámetros para la solicitud
             response = self._get_dte_claim(
                 company_vat=self.company_rut,
                 digital_signature=certificate,
@@ -293,30 +303,39 @@ class InvoiceMail(models.Model):
                 amount_total=self.amount_total
             )
 
-            if not response:
-                _logger.warning(f"No se recibió una respuesta válida del SII. Respuesta: {response}")
-                self.message_post(
-                    body="No se recibió una respuesta válida del SII.",
-                    subject="Consulta de Estado DTE",
-                )
-                raise UserError("No se recibió una respuesta válida del SII.")
+            # Loggear la respuesta cruda
+            _logger.info(f"Respuesta del SII: {response}")
 
-            # Procesar la respuesta si es válida
-            self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
-            _logger.info(f"Estado del DTE obtenido: {self.l10n_cl_dte_status}")
-            
-            if self.l10n_cl_dte_status == 'accepted':
-                self.state = 'accepted'
+            # Validar si la respuesta es un string
+            if isinstance(response, str):
+                # Analizar la respuesta si es una cadena XML o mensaje
+                _logger.info(f"Procesando respuesta en formato string: {response}")
+                self.l10n_cl_dte_status = 'unknown'  # Coloca un valor predeterminado
+                if "ACEPTADO" in response.upper():
+                    self.l10n_cl_dte_status = 'accepted'
+                elif "RECHAZADO" in response.upper():
+                    self.l10n_cl_dte_status = 'rejected'
+                else:
+                    _logger.warning(f"Respuesta del SII no contiene un estado conocido: {response}")
+            elif isinstance(response, dict):
+                # Procesar si la respuesta es un diccionario
+                self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
+                if self.l10n_cl_dte_status == 'accepted':
+                    self.state = 'accepted'
+            else:
+                _logger.error(f"Tipo de respuesta inesperado: {type(response)}")
+                raise UserError("No se recibió una respuesta válida del SII.")
 
             # Log en el chatter
             self.message_post(
-                body=f"Estado del DTE consultado: {self.l10n_cl_dte_status}. Respuesta del SII: {response}",
+                body=f"Estado del DTE consultado: {self.l10n_cl_dte_status}",
                 subject="Consulta de Estado DTE",
             )
 
         except Exception as e:
-            _logger.error(f"Error en check_sii_status: {e}")
+            _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
