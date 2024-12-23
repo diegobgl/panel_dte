@@ -222,12 +222,12 @@ class InvoiceMail(models.Model):
             client = zeep.Client(wsdl=wsdl_url, settings=settings)
 
             # Separar RUT y dígito verificador
-            rut_emisor = company_vat[:-2]
-            dv_emisor = company_vat[-1]
-            rut_receptor = self.partner_rut[:-2]
-            dv_receptor = self.partner_rut[-1]
-            rut_consultante = company_vat[:-2]
-            dv_consultante = company_vat[-1]
+            rut_emisor = str(company_vat[:-2])
+            dv_emisor = str(company_vat[-1])
+            rut_receptor = str(self.partner_rut[:-2])
+            dv_receptor = str(self.partner_rut[-1])
+            rut_consultante = str(company_vat[:-2])
+            dv_consultante = str(company_vat[-1])
 
             # Registrar detalles de la solicitud
             payload = {
@@ -241,7 +241,7 @@ class InvoiceMail(models.Model):
                 'FolioDte': str(document_number),
                 'FechaEmisionDte': date_emission.strftime('%Y-%m-%d'),
                 'MontoDte': str(int(amount_total)),
-                'Token': token
+                'Token': str(token)  # Convertir a string explícitamente
             }
             _logger.info(f"Enviando solicitud al SII con los siguientes parámetros: {payload}")
 
@@ -254,13 +254,18 @@ class InvoiceMail(models.Model):
 
         except zeep.exceptions.Fault as fault:
             _logger.error(f"Error de SOAP al consultar el estado del DTE: {fault}")
-            if hasattr(fault, 'detail'):
-                _logger.error(f"Detalles del error: {etree.tostring(fault.detail, pretty_print=True).decode()}")
+            if hasattr(fault, 'detail') and fault.detail is not None:
+                try:
+                    error_details = etree.tostring(fault.detail, pretty_print=True).decode()
+                    _logger.error(f"Detalles del error SOAP: {error_details}")
+                except Exception:
+                    _logger.error("No se pudieron extraer detalles del error SOAP.")
             raise UserError(f"Error de SOAP al consultar el estado del DTE: {fault}")
 
         except Exception as e:
             _logger.error(f"Error general al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
