@@ -6,6 +6,7 @@ from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
 import logging
+from lxml import etree  
 
 
 _logger = logging.getLogger(__name__)
