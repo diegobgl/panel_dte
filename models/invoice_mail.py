@@ -208,56 +208,55 @@ class InvoiceMail(models.Model):
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
         """Consultar estado del DTE en SII."""
         try:
-            if not all([company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total]):
-                raise UserError("Faltan parámetros requeridos para la solicitud al SII.")
-
             wsdl_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"
-            token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
 
+            # Generar un nuevo token antes de la consulta
+            _logger.info("Generando token para la consulta del DTE.")
+            token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
+            if not token:
+                raise UserError("No se pudo generar un token válido para la consulta al SII.")
+
+            # Configurar cliente SOAP
             settings = zeep.Settings(strict=False, xml_huge_tree=True)
             client = zeep.Client(wsdl=wsdl_url, settings=settings)
 
+            # Separar RUT y dígito verificador
             rut_emisor = company_vat[:-2]
             dv_emisor = company_vat[-1]
+            rut_receptor = self.partner_rut[:-2]
+            dv_receptor = self.partner_rut[-1]
+            rut_consultante = company_vat[:-2]
+            dv_consultante = company_vat[-1]
 
-            _logger.info("Enviando solicitud al SII con los siguientes parámetros:")
-            _logger.info({
-                "RutConsultante": rut_emisor,
-                "DvConsultante": dv_emisor,
-                "RutCompania": rut_emisor,
-                "DvCompania": dv_emisor,
-                "RutReceptor": self.partner_rut[:-2],
-                "DvReceptor": self.partner_rut[-1],
-                "TipoDte": str(document_type_code),
-                "FolioDte": str(document_number),
-                "FechaEmisionDte": date_emission.strftime('%Y-%m-%d'),
-                "MontoDte": str(int(amount_total)),
-                "Token": token,
-            })
+            # Registrar detalles de la solicitud
+            payload = {
+                'RutConsultante': rut_consultante,
+                'DvConsultante': dv_consultante,
+                'RutCompania': rut_emisor,
+                'DvCompania': dv_emisor,
+                'RutReceptor': rut_receptor,
+                'DvReceptor': dv_receptor,
+                'TipoDte': str(document_type_code),
+                'FolioDte': str(document_number),
+                'FechaEmisionDte': date_emission.strftime('%Y-%m-%d'),
+                'MontoDte': str(int(amount_total)),
+                'Token': token
+            }
+            _logger.info(f"Enviando solicitud al SII con los siguientes parámetros: {payload}")
 
-            response = client.service.getEstDte(
-                RutConsultante=rut_emisor,
-                DvConsultante=dv_emisor,
-                RutCompania=rut_emisor,
-                DvCompania=dv_emisor,
-                RutReceptor=self.partner_rut[:-2],
-                DvReceptor=self.partner_rut[-1],
-                TipoDte=str(document_type_code),
-                FolioDte=str(document_number),
-                FechaEmisionDte=date_emission.strftime('%Y-%m-%d'),
-                MontoDte=str(int(amount_total)),
-                Token=token
-            )
+            # Realizar la solicitud SOAP
+            response = client.service.getEstDte(**payload)
 
+            # Registrar la respuesta completa
             _logger.info(f"Respuesta completa del SII: {response}")
             return response
 
         except zeep.exceptions.Fault as fault:
             _logger.error(f"Error de SOAP al consultar el estado del DTE: {fault}")
+            if hasattr(fault, 'detail'):
+                _logger.error(f"Detalles del error: {etree.tostring(fault.detail, pretty_print=True).decode()}")
             raise UserError(f"Error de SOAP al consultar el estado del DTE: {fault}")
-        except requests.exceptions.RequestException as req_error:
-            _logger.error(f"Error de conexión al SII: {req_error}")
-            raise UserError(f"Error de conexión al SII: {req_error}")
+
         except Exception as e:
             _logger.error(f"Error general al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
