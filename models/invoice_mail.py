@@ -1,5 +1,5 @@
 import requests
-import zeep
+import urllib3
 from odoo import models, fields, api
 from odoo.tools import email_split
 from odoo.exceptions import UserError
@@ -207,19 +207,16 @@ class InvoiceMail(models.Model):
 
 
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
-        """Consultar estado del DTE en SII."""
+        """Consultar estado del DTE en SII usando urllib3."""
         try:
-            wsdl_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"
+            # URL del servicio SOAP
+            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
 
-            # Generar un nuevo token antes de la consulta
+            # Generar un nuevo token
             _logger.info("Generando token para la consulta del DTE.")
             token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
             if not token:
                 raise UserError("No se pudo generar un token válido para la consulta al SII.")
-
-            # Configurar cliente SOAP
-            settings = zeep.Settings(strict=False, xml_huge_tree=True)
-            client = zeep.Client(wsdl=wsdl_url, settings=settings)
 
             # Separar RUT y dígito verificador
             rut_emisor = str(company_vat[:-2])
@@ -229,38 +226,62 @@ class InvoiceMail(models.Model):
             rut_consultante = str(company_vat[:-2])
             dv_consultante = str(company_vat[-1])
 
-            # Registrar detalles de la solicitud
-            payload = {
-                'RutConsultante': rut_consultante,
-                'DvConsultante': dv_consultante,
-                'RutCompania': rut_emisor,
-                'DvCompania': dv_emisor,
-                'RutReceptor': rut_receptor,
-                'DvReceptor': dv_receptor,
-                'TipoDte': str(document_type_code),
-                'FolioDte': str(document_number),
-                'FechaEmisionDte': date_emission.strftime('%Y-%m-%d'),
-                'MontoDte': str(int(amount_total)),
-                'Token': str(token)  # Convertir a string explícitamente
+            # Crear el cuerpo del XML para la solicitud SOAP
+            soap_request = f"""
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
+               <soapenv:Header/>
+               <soapenv:Body>
+                  <dte:getEstDte>
+                     <RutConsultante>{rut_consultante}</RutConsultante>
+                     <DvConsultante>{dv_consultante}</DvConsultante>
+                     <RutCompania>{rut_emisor}</RutCompania>
+                     <DvCompania>{dv_emisor}</DvCompania>
+                     <RutReceptor>{rut_receptor}</RutReceptor>
+                     <DvReceptor>{dv_receptor}</DvReceptor>
+                     <TipoDte>{document_type_code}</TipoDte>
+                     <FolioDte>{document_number}</FolioDte>
+                     <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
+                     <MontoDte>{int(amount_total)}</MontoDte>
+                     <Token>{token}</Token>
+                  </dte:getEstDte>
+               </soapenv:Body>
+            </soapenv:Envelope>
+            """
+
+            _logger.info(f"Enviando solicitud al SII con los siguientes parámetros:\n{soap_request}")
+
+            # Configurar urllib3
+            http = urllib3.PoolManager()
+            headers = {
+                'Content-Type': 'text/xml; charset=utf-8',
+                'SOAPAction': ''
             }
-            _logger.info(f"Enviando solicitud al SII con los siguientes parámetros: {payload}")
 
-            # Realizar la solicitud SOAP
-            response = client.service.getEstDte(**payload)
+            # Enviar la solicitud
+            response = http.request(
+                'POST',
+                url,
+                body=soap_request.encode('utf-8'),
+                headers=headers
+            )
 
-            # Registrar la respuesta completa
-            _logger.info(f"Respuesta completa del SII: {response}")
-            return response
+            # Validar el código de respuesta HTTP
+            if response.status != 200:
+                _logger.error(f"Error HTTP al consultar el estado del DTE: {response.status}")
+                raise UserError(f"Error HTTP al consultar el estado del DTE: {response.status}")
 
-        except zeep.exceptions.Fault as fault:
-            _logger.error(f"Error de SOAP al consultar el estado del DTE: {fault}")
-            if hasattr(fault, 'detail') and fault.detail is not None:
-                try:
-                    error_details = etree.tostring(fault.detail, pretty_print=True).decode()
-                    _logger.error(f"Detalles del error SOAP: {error_details}")
-                except Exception:
-                    _logger.error("No se pudieron extraer detalles del error SOAP.")
-            raise UserError(f"Error de SOAP al consultar el estado del DTE: {fault}")
+            # Parsear la respuesta SOAP
+            response_xml = etree.fromstring(response.data)
+            _logger.info(f"Respuesta completa del SII: {etree.tostring(response_xml, pretty_print=True).decode()}")
+
+            # Extraer el estado del DTE desde la respuesta
+            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
+                  'sii': 'http://DefaultNamespace'}
+            estado = response_xml.xpath('//sii:STATUS', namespaces=ns)
+            if estado:
+                return estado[0].text
+            else:
+                raise UserError("No se pudo obtener el estado del DTE en la respuesta del SII.")
 
         except Exception as e:
             _logger.error(f"Error general al consultar el estado del DTE: {e}")
@@ -281,18 +302,11 @@ class InvoiceMail(models.Model):
             # Obtener certificado activo
             certificate = self._get_active_certificate()
 
-            # Validar token y obtenerlo si no existe
-            util = self.env['l10n_cl.edi.util']
-            token = util._get_token('SII', certificate)
-
-            if not token:
-                raise UserError("No se pudo obtener un token válido desde el SII.")
-
             # Log de solicitud de claim
             _logger.info(f"Solicitando estado al SII con: RUT={self.company_rut}, TipoDoc={self.document_type.code}, Folio={self.folio_number}")
 
             # Parámetros para la solicitud
-            response = self._get_dte_claim(
+            estado = self._get_dte_claim(
                 company_vat=self.company_rut,
                 digital_signature=certificate,
                 document_type_code=self.document_type.code,
@@ -301,28 +315,15 @@ class InvoiceMail(models.Model):
                 amount_total=self.amount_total
             )
 
-            # Loggear la respuesta cruda
-            _logger.info(f"Respuesta del SII: {response}")
-
-            # Validar si la respuesta es un string
-            if isinstance(response, str):
-                # Analizar la respuesta si es una cadena XML o mensaje
-                _logger.info(f"Procesando respuesta en formato string: {response}")
-                self.l10n_cl_dte_status = 'unknown'  # Coloca un valor predeterminado
-                if "ACEPTADO" in response.upper():
-                    self.l10n_cl_dte_status = 'accepted'
-                elif "RECHAZADO" in response.upper():
-                    self.l10n_cl_dte_status = 'rejected'
-                else:
-                    _logger.warning(f"Respuesta del SII no contiene un estado conocido: {response}")
-            elif isinstance(response, dict):
-                # Procesar si la respuesta es un diccionario
-                self.l10n_cl_dte_status = response.get('STATUS', 'unknown')
-                if self.l10n_cl_dte_status == 'accepted':
-                    self.state = 'accepted'
+            # Actualizar estado
+            _logger.info(f"Estado recibido del SII: {estado}")
+            if estado == 'ACEPTADO':
+                self.l10n_cl_dte_status = 'accepted'
+                self.state = 'accepted'
+            elif estado == 'RECHAZADO':
+                self.l10n_cl_dte_status = 'rejected'
             else:
-                _logger.error(f"Tipo de respuesta inesperado: {type(response)}")
-                raise UserError("No se recibió una respuesta válida del SII.")
+                self.l10n_cl_dte_status = 'unknown'
 
             # Log en el chatter
             self.message_post(
@@ -333,7 +334,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
-
 
 
 
