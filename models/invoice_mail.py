@@ -336,7 +336,7 @@ class InvoiceMail(models.Model):
                 raise UserError("El servicio del SII devolvió una respuesta inesperada al solicitar el token. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta y extraer el token
-            token_root = etree.fromstring(token_response.data)
+            token_root = etree.fromstring(token_response.data.strip())
             token = token_root.find('.//TOKEN').text
             _logger.info(f"Token obtenido correctamente: {token}")
             return token
