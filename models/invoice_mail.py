@@ -346,7 +346,6 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al obtener el token del SII: {e}")
 
 
-
     def check_sii_status(self):
         """Consulta el estado del DTE en el SII."""
         self.ensure_one()
