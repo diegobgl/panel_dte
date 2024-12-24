@@ -293,52 +293,58 @@ class InvoiceMail(models.Model):
 
     
     def _get_token(self):
-            """Genera un token válido desde el SII."""
-            try:
-                _logger.info("Generando semilla para obtener el token del SII.")
-                # URL del servicio para obtener la semilla
-                seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
-                http = urllib3.PoolManager()
-                response = http.request('GET', seed_url)
-                
-                if response.status != 200:
-                    raise UserError("No se pudo obtener la semilla del SII.")
-                
-                # Parsear la respuesta y extraer la semilla
-                root = etree.fromstring(response.data)
-                seed = root.find('.//SEMILLA').text
-                
-                _logger.info(f"Semilla obtenida: {seed}")
-                
-                # Crear el XML firmado para obtener el token
-                signed_seed = f"""
-                <getToken>
-                    <item>
-                        <Semilla>{seed}</Semilla>
-                    </item>
-                </getToken>
-                """
-                
-                token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
-                headers = {'Content-Type': 'application/xml'}
-                token_response = http.request(
-                    'POST',
-                    token_url,
-                    body=signed_seed.encode('utf-8'),
-                    headers=headers,
-                )
-                
-                if token_response.status != 200:
-                    raise UserError("No se pudo obtener el token desde el SII.")
-                
-                token_root = etree.fromstring(token_response.data)
-                token = token_root.find('.//TOKEN').text
-                
-                _logger.info(f"Token obtenido correctamente: {token}")
-                return token
-            except Exception as e:
-                _logger.error(f"Error al obtener el token: {e}")
-                raise UserError(f"Error al obtener el token del SII: {e}")
+        """Genera un token válido desde el SII."""
+        try:
+            _logger.info("Generando semilla para obtener el token del SII.")
+            # URL del servicio para obtener la semilla
+            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+            http = urllib3.PoolManager()
+            response = http.request('GET', seed_url)
+
+            if response.status != 200:
+                raise UserError("No se pudo obtener la semilla del SII.")
+            
+            # Registrar la respuesta completa para depuración
+            _logger.info(f"Respuesta completa al solicitar la semilla: {response.data.decode('utf-8')}")
+            
+            # Parsear la respuesta y extraer la semilla
+            root = etree.fromstring(response.data)
+            seed = root.find('.//SEMILLA').text
+            
+            _logger.info(f"Semilla obtenida: {seed}")
+            
+            # Crear el XML firmado para obtener el token
+            signed_seed = f"""
+            <getToken>
+                <item>
+                    <Semilla>{seed}</Semilla>
+                </item>
+            </getToken>
+            """
+            
+            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+            headers = {'Content-Type': 'application/xml'}
+            token_response = http.request(
+                'POST',
+                token_url,
+                body=signed_seed.encode('utf-8'),
+                headers=headers,
+            )
+            
+            if token_response.status != 200:
+                raise UserError("No se pudo obtener el token desde el SII.")
+            
+            # Registrar la respuesta completa para depuración
+            _logger.info(f"Respuesta completa al solicitar el token: {token_response.data.decode('utf-8')}")
+            
+            token_root = etree.fromstring(token_response.data)
+            token = token_root.find('.//TOKEN').text
+            
+            _logger.info(f"Token obtenido correctamente: {token}")
+            return token
+        except Exception as e:
+            _logger.error(f"Error al obtener el token: {e}")
+            raise UserError(f"Error al obtener el token del SII: {e}")
 
 
     def check_sii_status(self):
