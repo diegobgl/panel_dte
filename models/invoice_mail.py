@@ -212,7 +212,7 @@ class InvoiceMail(models.Model):
             # URL del servicio SOAP
             url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
 
-            # Generar un nuevo token
+            # Generar un nuevo token antes de la consulta
             _logger.info("Generando token para la consulta del DTE.")
             token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
             if not token:
@@ -229,22 +229,22 @@ class InvoiceMail(models.Model):
             # Crear el cuerpo del XML para la solicitud SOAP
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
-               <soapenv:Header/>
-               <soapenv:Body>
-                  <dte:getEstDte>
-                     <RutConsultante>{rut_consultante}</RutConsultante>
-                     <DvConsultante>{dv_consultante}</DvConsultante>
-                     <RutCompania>{rut_emisor}</RutCompania>
-                     <DvCompania>{dv_emisor}</DvCompania>
-                     <RutReceptor>{rut_receptor}</RutReceptor>
-                     <DvReceptor>{dv_receptor}</DvReceptor>
-                     <TipoDte>{document_type_code}</TipoDte>
-                     <FolioDte>{document_number}</FolioDte>
-                     <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
-                     <MontoDte>{int(amount_total)}</MontoDte>
-                     <Token>{token}</Token>
-                  </dte:getEstDte>
-               </soapenv:Body>
+            <soapenv:Header/>
+            <soapenv:Body>
+                <dte:getEstDte>
+                    <RutConsultante>{rut_consultante}</RutConsultante>
+                    <DvConsultante>{dv_consultante}</DvConsultante>
+                    <RutCompania>{rut_emisor}</RutCompania>
+                    <DvCompania>{dv_emisor}</DvCompania>
+                    <RutReceptor>{rut_receptor}</RutReceptor>
+                    <DvReceptor>{dv_receptor}</DvReceptor>
+                    <TipoDte>{document_type_code}</TipoDte>
+                    <FolioDte>{document_number}</FolioDte>
+                    <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
+                    <MontoDte>{int(amount_total)}</MontoDte>
+                    <Token>{token}</Token>
+                </dte:getEstDte>
+            </soapenv:Body>
             </soapenv:Envelope>
             """
 
@@ -276,16 +276,20 @@ class InvoiceMail(models.Model):
 
             # Extraer el estado del DTE desde la respuesta
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                  'sii': 'http://DefaultNamespace'}
-            estado = response_xml.xpath('//sii:STATUS', namespaces=ns)
-            if estado:
-                return estado[0].text
-            else:
-                raise UserError("No se pudo obtener el estado del DTE en la respuesta del SII.")
+                'sii': 'http://www.sii.cl/XMLSchema'}
+            estado = response_xml.xpath('//sii:ESTADO', namespaces=ns)
+            glosa = response_xml.xpath('//sii:GLOSA', namespaces=ns)
+
+            if estado and estado[0].text == '001':
+                _logger.error(f"Error del SII: {glosa[0].text if glosa else 'TOKEN NO EXISTE'}")
+                raise UserError(f"Error del SII: {glosa[0].text if glosa else 'TOKEN NO EXISTE'}")
+
+            return estado[0].text if estado else None
 
         except Exception as e:
             _logger.error(f"Error general al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+
 
 
 
