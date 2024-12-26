@@ -200,23 +200,56 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        """Solicitar la semilla al SII."""
-        url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
-        headers = {'Content-Type': 'text/xml; charset=utf-8'}
-        soap_body = """<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-            <soapenv:Body>
-                <getSeed xmlns="https://palena.sii.cl/DTEWS/CrSeed.jws"/>
-            </soapenv:Body>
-        </soapenv:Envelope>"""
-        response = requests.post(url, data=soap_body, headers=headers)
+        """Solicita la semilla al SII."""
+        try:
+            # URL del servicio SOAP
+            url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+            headers = {'Content-Type': 'text/xml; charset=utf-8'}
+            
+            # Construir el cuerpo de la solicitud SOAP
+            soap_body = """
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:impl="http://DefaultNamespace">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <impl:getSeed/>
+                </soapenv:Body>
+            </soapenv:Envelope>
+            """
 
-        if response.status_code != 200:
-            raise UserError("Error al obtener la semilla del SII.")
+            # Enviar la solicitud al SII
+            response = requests.post(url, data=soap_body, headers=headers, timeout=30)
 
-        # Parsear la respuesta para extraer la semilla
-        root = etree.fromstring(response.content)
-        seed = root.find(".//SEMILLA").text
-        return seed
+            # Verificar el código de respuesta HTTP
+            if response.status_code != 200:
+                _logger.error(f"Error HTTP al obtener la semilla: {response.status_code}")
+                raise UserError(f"Error al obtener la semilla. Código HTTP: {response.status_code}")
+
+            # Registrar la respuesta completa para depuración
+            _logger.info(f"Respuesta del servicio CrSeed: {response.content.decode('utf-8')}")
+
+            # Validar si la respuesta contiene HTML (indicativo de error)
+            if b'<html' in response.content.lower():
+                raise UserError("El servicio del SII devolvió una respuesta inesperada. Verifique la URL o el estado del servicio.")
+
+            # Parsear la respuesta SOAP para extraer la semilla
+            root = etree.fromstring(response.content)
+            seed = root.find(".//{http://www.sii.cl/XMLSchema}SEMILLA").text
+
+            if not seed:
+                _logger.error("No se encontró la semilla en la respuesta del SII.")
+                raise UserError("No se pudo obtener la semilla del SII.")
+
+            _logger.info(f"Semilla obtenida correctamente: {seed}")
+            return seed
+
+        except requests.exceptions.RequestException as e:
+            _logger.error(f"Error de red al solicitar la semilla: {e}")
+            raise UserError("Error de conexión al solicitar la semilla del SII. Verifique la red.")
+
+        except Exception as e:
+            _logger.error(f"Error general al obtener la semilla: {e}")
+            raise UserError(f"Error al obtener la semilla del SII: {e}")
+
 
     def _sign_seed(self, seed):
         """Firma la semilla utilizando el certificado configurado en Odoo."""
