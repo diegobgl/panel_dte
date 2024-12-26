@@ -198,12 +198,13 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
+        """Obtiene la semilla desde el servicio del SII."""
         try:
-            url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+            url = "https://palena.sii.cl/DTEWS/CrSeed.jws"  # Cambiar a maullin.sii.cl si es ambiente de pruebas
             http = urllib3.PoolManager()
             response = http.request('GET', url)
 
-            # Log de la respuesta
+            # Log de la respuesta para diagnóstico
             _logger.info(f"Respuesta del servicio CrSeed: {response.data.decode('utf-8')}")
 
             # Validar si la respuesta contiene HTML
@@ -220,7 +221,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener la semilla del SII: {e}")
             raise UserError(f"Error al obtener la semilla del SII: {e}")
-
 
     def _get_active_certificate(self):
         """Devuelve el certificado activo o lanza una excepción."""
