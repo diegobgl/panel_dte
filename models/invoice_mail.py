@@ -203,13 +203,38 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        """Obtiene la semilla utilizando los recursos de Odoo."""
-        try:
-            mode = 'SII'  # O 'SIITEST' para pruebas
-            return self.env['l10n_cl.edi.util']._get_seed(mode)
-        except Exception as e:
-            _logger.error(f"Error al obtener la semilla del SII: {e}")
-            raise UserError(_("Error al obtener la semilla del SII: %s") % e)
+        """
+        Obtiene la semilla desde el SII con manejo de errores HTTP 503.
+        """
+        url = "https://palena.sii.cl/DTEWS/CrSeed.jws?WSDL"
+        headers = {'Content-Type': 'application/xml; charset=utf-8'}
+        max_retries = 5
+        retry_delay = 5  # Tiempo de espera entre reintentos (en segundos)
+
+        for attempt in range(max_retries):
+            try:
+                # Realizar la solicitud al servicio del SII
+                http = self.env['l10n_cl.edi.util']._get_http()
+                response = http.request('GET', url, headers=headers)
+
+                if response.status == 200:
+                    # Validar que la respuesta contenga XML válido
+                    root = etree.fromstring(response.data)
+                    seed = root.find('.//SEMILLA')
+                    if seed is not None:
+                        return seed.text
+                    else:
+                        raise UserError(_("La respuesta del SII no contiene la semilla esperada."))
+                elif response.status == 503:
+                    _logger.warning(f"El servidor del SII no está disponible (503). Intento {attempt + 1} de {max_retries}.")
+                    time.sleep(retry_delay)  # Esperar antes de reintentar
+                else:
+                    raise UserError(_("Error HTTP %s al obtener la semilla.") % response.status)
+            except Exception as e:
+                _logger.error(f"Error al obtener la semilla del SII: {e}")
+                raise UserError(_("Error al obtener la semilla del SII: %s") % e)
+        raise UserError(_("El servidor del SII no está disponible después de múltiples intentos."))
+
 
     def _sign_seed(self, seed, private_key, public_cert):
         """
