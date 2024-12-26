@@ -216,8 +216,11 @@ class InvoiceMail(models.Model):
         Firma la semilla utilizando la clave privada y genera el XML firmado.
         """
         try:
+            # Crear objeto de clave privada usando cryptography
+            key = load_pem_private_key(private_key, password=None, backend=default_backend())
+
             # Firmar la semilla
-            signature = private_key.sign(
+            signature = key.sign(
                 seed.encode('utf-8'),
                 padding.PKCS1v15(),
                 hashes.SHA256()
@@ -238,6 +241,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(_("Error al firmar la semilla: %s") % e)
+
 
 
 
@@ -342,13 +346,17 @@ class InvoiceMail(models.Model):
         if not certificate or not certificate._is_valid_certificate():
             raise UserError("No se encontró un certificado válido para obtener el token.")
 
-        # Obtener clave privada y certificado
-        cert_data = certificate._get_data()  # Devuelve (certificado_pem, objeto_certificado, clave_privada)
-        private_key = cert_data[2]
-        public_cert = cert_data[0]
+        # Obtener clave privada y certificado público
+        try:
+            cert_data = certificate._get_data()  # Devuelve (cert_pem, certificado, clave_privada)
+            private_key = cert_data[2]  # Clave privada
+            public_cert = cert_data[0]  # Certificado público en formato PEM
+        except Exception as e:
+            _logger.error(f"Error al obtener los datos del certificado: {e}")
+            raise UserError(_("Error al obtener los datos del certificado: %s") % e)
 
         # Generar semilla
-        seed = self._get_seed_from_sii()
+        seed = self._get_seed()
 
         # Crear y firmar el XML con la semilla
         signed_xml = self._sign_seed(seed, private_key, public_cert)
@@ -356,7 +364,6 @@ class InvoiceMail(models.Model):
         # Enviar solicitud para obtener el token
         token = self._request_token(signed_xml)
         return token
-
 
 
 
