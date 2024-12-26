@@ -200,13 +200,10 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        """Solicita la semilla al SII."""
+        """Solicita la semilla al SII con manejo de errores."""
         try:
-            # URL del servicio SOAP
             url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
             headers = {'Content-Type': 'text/xml; charset=utf-8'}
-            
-            # Construir el cuerpo de la solicitud SOAP
             soap_body = """
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:impl="http://DefaultNamespace">
                 <soapenv:Header/>
@@ -216,39 +213,33 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            # Enviar la solicitud al SII
-            response = requests.post(url, data=soap_body, headers=headers, timeout=30)
+            MAX_RETRIES = 3
+            for attempt in range(MAX_RETRIES):
+                response = requests.post(url, data=soap_body, headers=headers, timeout=30)
 
-            # Verificar el código de respuesta HTTP
-            if response.status_code != 200:
-                _logger.error(f"Error HTTP al obtener la semilla: {response.status_code}")
-                raise UserError(f"Error al obtener la semilla. Código HTTP: {response.status_code}")
+                if response.status_code == 200:
+                    # Parsear la respuesta para obtener la semilla
+                    root = etree.fromstring(response.content)
+                    seed = root.find(".//{http://www.sii.cl/XMLSchema}SEMILLA").text
+                    if seed:
+                        _logger.info(f"Semilla obtenida: {seed}")
+                        return seed
+                    else:
+                        _logger.error("No se encontró la semilla en la respuesta del SII.")
+                        raise UserError("No se pudo obtener la semilla del SII.")
+                
+                elif response.status_code == 500:
+                    _logger.warning(f"Error HTTP 500 al obtener la semilla. Intento {attempt + 1} de {MAX_RETRIES}.")
+                    time.sleep(5)  # Esperar antes de reintentar
+                else:
+                    _logger.error(f"Error HTTP al obtener la semilla: {response.status_code}")
+                    raise UserError(f"Error al obtener la semilla. Código HTTP: {response.status_code}")
 
-            # Registrar la respuesta completa para depuración
-            _logger.info(f"Respuesta del servicio CrSeed: {response.content.decode('utf-8')}")
-
-            # Validar si la respuesta contiene HTML (indicativo de error)
-            if b'<html' in response.content.lower():
-                raise UserError("El servicio del SII devolvió una respuesta inesperada. Verifique la URL o el estado del servicio.")
-
-            # Parsear la respuesta SOAP para extraer la semilla
-            root = etree.fromstring(response.content)
-            seed = root.find(".//{http://www.sii.cl/XMLSchema}SEMILLA").text
-
-            if not seed:
-                _logger.error("No se encontró la semilla en la respuesta del SII.")
-                raise UserError("No se pudo obtener la semilla del SII.")
-
-            _logger.info(f"Semilla obtenida correctamente: {seed}")
-            return seed
+            raise UserError("No se pudo obtener la semilla después de varios intentos.")
 
         except requests.exceptions.RequestException as e:
-            _logger.error(f"Error de red al solicitar la semilla: {e}")
-            raise UserError("Error de conexión al solicitar la semilla del SII. Verifique la red.")
-
-        except Exception as e:
-            _logger.error(f"Error general al obtener la semilla: {e}")
-            raise UserError(f"Error al obtener la semilla del SII: {e}")
+            _logger.error(f"Error de conexión al obtener la semilla: {e}")
+            raise UserError("Error de conexión al solicitar la semilla del SII.")
 
 
     def _sign_seed(self, seed):
