@@ -1,13 +1,15 @@
-from odoo import _, models, fields, api
-from odoo.exceptions import UserError
+import logging
 import base64
 import time
-import logging
-from zeep import Client, Settings
-from zeep.plugins import HistoryPlugin
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 from lxml import etree
-
-
+from zeep import Client, Settings
+from zeep.transports import Transport
+from odoo import models, fields, api
+from odoo.exceptions import UserError
 
 
 _logger = logging.getLogger(__name__)
@@ -48,6 +50,9 @@ class InvoiceMail(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
+    l10n_cl_sii_token = fields.Char(string='Token SII', readonly=True)
+    l10n_cl_sii_token_expiration = fields.Datetime(string='Token Expiration', readonly=True)
+
 
 
 
@@ -199,48 +204,62 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        wsdl_url = "https://palena.sii.cl/DTEWS/CrSeed.jws?WSDL"
-        max_retries = 3
-        retry_delay = 5  # segundos
+        """Obtiene la semilla desde el SII."""
+        try:
+            client = Client('https://palena.sii.cl/DTEWS/CrSeed.jws?WSDL')
+            response = client.service.getSeed()
+            seed = response['SEMILLA']
+            if not seed:
+                raise UserError("No se pudo obtener la semilla del SII.")
+            _logger.info(f"Semilla obtenida: {seed}")
+            return seed
+        except Exception as e:
+            _logger.error(f"Error al obtener la semilla del SII: {e}")
+            raise UserError(f"Error al obtener la semilla del SII: {e}")
 
-        for attempt in range(max_retries):
-            try:
-                history = HistoryPlugin()
-                settings = Settings(strict=False, xml_huge_tree=True)
-                client = Client(wsdl=wsdl_url, settings=settings, plugins=[history])
-
-                response = client.service.getSeed()
-                root = etree.fromstring(response.encode('utf-8'))
-                seed = root.find('.//SEMILLA')
-                if seed is not None:
-                    return seed.text
-                else:
-                    raise UserError(_("La respuesta del SII no contiene la semilla esperada."))
-            except Exception as e:
-                _logger.warning(f"Intento {attempt + 1} de {max_retries} fallido: {e}")
-                time.sleep(retry_delay)
-        raise UserError(_("No se pudo obtener la semilla después de varios intentos."))
 
     def _sign_seed(self, seed, private_key, public_cert):
-        """
-        Firma la semilla utilizando Zeep y los datos del certificado.
-        """
+        """Firma la semilla con el certificado."""
         try:
-            # Aquí implementarías el proceso de firma del XML, tal como se hace en tu implementación actual.
-            # Este paso puede requerir el uso de bibliotecas adicionales como `cryptography` para firmar la semilla.
+            key = load_pem_private_key(private_key.encode(), password=None, backend=default_backend())
+            signature = key.sign(
+                seed.encode('utf-8'),
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
 
-            # Ejemplo simplificado: asumiendo que ya tienes el XML firmado
+            # Crear el XML firmado
             signed_xml = f"""
             <getToken>
                 <item>
                     <Semilla>{seed}</Semilla>
                 </item>
+                <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+                    <SignedInfo>
+                        <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+                        <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+                        <Reference URI="">
+                            <Transforms>
+                                <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                            </Transforms>
+                            <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+                            <DigestValue></DigestValue>
+                        </Reference>
+                    </SignedInfo>
+                    <SignatureValue>{base64.b64encode(signature).decode('utf-8')}</SignatureValue>
+                    <KeyInfo>
+                        <X509Data>
+                            <X509Certificate>{public_cert}</X509Certificate>
+                        </X509Data>
+                    </KeyInfo>
+                </Signature>
             </getToken>
             """
+            _logger.info(f"Semilla firmada correctamente: {signed_xml}")
             return signed_xml
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
-            raise UserError(_("Error al firmar la semilla: %s") % e)
+            raise UserError(f"Error al firmar la semilla: {e}")
 
 
 
@@ -340,34 +359,33 @@ class InvoiceMail(models.Model):
 
 
             
-    def _get_token(self, signed_seed):
-        """
-        Obtiene un token válido desde el servicio del SII utilizando Zeep.
-        """
+    def _get_token(self):
+        """Obtiene el token desde el SII."""
+        certificate = self.env['l10n_cl.certificate'].search([], limit=1)
+        if not certificate or not certificate._is_valid_certificate():
+            raise UserError("No se encontró un certificado válido para obtener el token.")
+
+        # Obtener la clave privada y el certificado público
+        cert_data = certificate._get_data()
+        private_key = cert_data[2].decode('utf-8')
+        public_cert = cert_data[0].decode('utf-8')
+
+        # Paso 1: Obtener la semilla
+        seed = self._get_seed()
+
+        # Paso 2: Firmar la semilla
+        signed_seed = self._sign_seed(seed, private_key, public_cert)
+
+        # Paso 3: Enviar la semilla firmada para obtener el token
         try:
-            # URL del servicio para obtener el token
-            wsdl_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws?WSDL"
-
-            # Crear cliente Zeep
-            history = HistoryPlugin()
-            settings = Settings(strict=False, xml_huge_tree=True)
-            client = Client(wsdl=wsdl_url, settings=settings, plugins=[history])
-
-            # Llamar al servicio SOAP para obtener el token
+            client = Client('https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws?WSDL')
             response = client.service.getToken(signed_seed)
-
-            # Parsear el XML de respuesta
-            root = etree.fromstring(response.encode('utf-8'))
-            token = root.find('.//TOKEN')
-            if token is not None:
-                return token.text
-            else:
-                raise UserError(_("La respuesta del SII no contiene el token esperado."))
+            token = response['TOKEN']
+            _logger.info(f"Token obtenido: {token}")
+            return token
         except Exception as e:
             _logger.error(f"Error al obtener el token del SII: {e}")
-            raise UserError(_("Error al obtener el token del SII: %s") % e)
-
-
+            raise UserError(f"Error al obtener el token del SII: {e}")
 
 
 
@@ -426,6 +444,12 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al enviar la solicitud SOAP al SII: {e}")
             raise UserError(f"Error al enviar la solicitud SOAP al SII: {e}")
 
+    def action_get_token(self):
+        """Acción para obtener y almacenar el token del SII."""
+        token = self._get_token()
+        self.l10n_cl_sii_token = token
+        self.l10n_cl_sii_token_expiration = fields.Datetime.now() + timedelta(hours=12)
+        _logger.info("Token almacenado correctamente.")
 
 
 class InvoiceMailLine(models.Model):
