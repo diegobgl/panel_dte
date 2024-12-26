@@ -1,6 +1,7 @@
 from odoo import _, models, fields, api
 from odoo.exceptions import UserError
 import base64
+import time
 import logging
 from zeep import Client, Settings
 from zeep.plugins import HistoryPlugin
