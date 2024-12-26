@@ -1,5 +1,5 @@
 import requests
-from odoo import models, fields, api
+from odoo import _, models, fields, api
 from odoo.tools import email_split
 from odoo.exceptions import UserError
 import base64
@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import logging
 from lxml import etree  
 import time
-import zeep
+import zeepss
 from zeep import Client, Settings
 from zeep.transports import Transport
 
