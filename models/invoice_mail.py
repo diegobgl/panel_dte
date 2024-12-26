@@ -200,7 +200,7 @@ class InvoiceMail(models.Model):
     def _get_seed(self):
         """Obtiene la semilla desde el servicio del SII."""
         try:
-            url = "https://palena.sii.cl/DTEWS/CrSeed.jws"  # Cambiar a maullin.sii.cl si es ambiente de pruebas
+            url = "https://maullin.sii.cl/DTEWS/CrSeed.jws"  # Cambiar a maullin.sii.cl si es ambiente de pruebas
             http = urllib3.PoolManager()
             response = http.request('GET', url)
 
