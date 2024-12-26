@@ -10,6 +10,8 @@ from lxml import etree
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
+import time
+
 
 _logger = logging.getLogger(__name__)
 class InvoiceMail(models.Model):
@@ -434,7 +436,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al enviar la solicitud SOAP al SII: {e}")
             raise UserError(f"Error al enviar la solicitud SOAP al SII: {e}")
-
 
 
 
