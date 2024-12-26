@@ -332,16 +332,28 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
 
-        
+            
     def _get_token(self):
-        """Obtiene el token reutilizando la lógica de Odoo."""
-        try:
-            certificate = self._get_active_certificate()
-            mode = 'SII'  # O 'SIITEST'
-            return self.env['l10n_cl.edi.util']._get_token(mode, certificate)
-        except Exception as e:
-            _logger.error(f"Error al obtener el token del SII: {e}")
-            raise UserError(_("Error al obtener el token del SII: %s") % e)
+        """Obtiene un token válido desde el SII."""
+        certificate = self.env['l10n_cl.certificate'].search([], limit=1)
+        if not certificate or not certificate._is_valid_certificate():
+            raise UserError("No se encontró un certificado válido para obtener el token.")
+
+        # Obtener clave privada y certificado
+        cert_data = certificate._get_data()
+        private_key = cert_data[2]
+        public_cert = cert_data[0]
+
+        # Generar semilla
+        seed = self._get_seed_from_sii()
+
+        # Crear y firmar el XML con la semilla
+        signed_xml = self._sign_seed(seed, private_key, public_cert)
+
+        # Enviar solicitud para obtener el token
+        token = self._request_token(signed_xml)
+        return token
+
 
 
 
