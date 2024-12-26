@@ -292,76 +292,35 @@ class InvoiceMail(models.Model):
 
 
     
-    def _get_token(self):
-        """Genera un token válido desde el SII."""
+    def _get_token(self, certificate):
+        """
+        Genera un token válido desde el SII utilizando un certificado digital activo.
+        """
         try:
-            _logger.info("Generando semilla para obtener el token del SII.")
-            # URL del servicio para obtener la semilla
-            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
-            http = urllib3.PoolManager()
-            response = http.request('GET', seed_url)
-
-            # Verificar si la respuesta contiene HTML
-            if b'<html' in response.data.lower():
-                _logger.error(f"El servicio devolvió una página HTML en lugar de un XML válido: {response.data.decode('utf-8')}")
-                raise UserError("El servicio del SII devolvió una respuesta inesperada. Verifique la URL o el estado del servicio.")
-
-            # Parsear la respuesta y extraer la semilla
-            root = etree.fromstring(response.data)
-            seed = root.find('.//SEMILLA').text
-            _logger.info(f"Semilla obtenida: {seed}")
-
-            # Crear el XML firmado para obtener el token
-            signed_seed = f"""
-            <getToken>
-                <item>
-                    <Semilla>{seed}</Semilla>
-                </item>
-            </getToken>
-            """
-
-            # Solicitar el token al servicio del SII
-            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
-            headers = {'Content-Type': 'application/xml'}
-            token_response = http.request(
-                'POST',
-                token_url,
-                body=signed_seed.encode('utf-8'),
-                headers=headers,
-            )
-
-            # Verificar si la respuesta contiene HTML
-            if b'<html' in token_response.data.lower():
-                _logger.error(f"El servicio devolvió una página HTML en lugar de un XML válido al solicitar el token: {token_response.data.decode('utf-8')}")
-                raise UserError("El servicio del SII devolvió una respuesta inesperada al solicitar el token. Verifique la URL o el estado del servicio.")
-
-            # Parsear la respuesta y extraer el token
-            token_root = etree.fromstring(token_response.data.strip())
-            token = token_root.find('.//TOKEN').text
-            _logger.info(f"Token obtenido correctamente: {token}")
+            token = self._get_signed_token(certificate, self._get_seed('SII'))
+            if not token:
+                raise UserError("No se pudo generar un token válido para la consulta al SII.")
             return token
-
         except Exception as e:
-            _logger.error(f"Error al obtener el token: {e}")
+            _logger.error(f"Error al obtener el token del SII: {e}")
             raise UserError(f"Error al obtener el token del SII: {e}")
 
 
     def check_sii_status(self):
-        """Consulta el estado del DTE en el SII."""
+        """
+        Consulta el estado del DTE en el SII reutilizando las herramientas de `l10n_cl_edi_util`.
+        """
         self.ensure_one()
+        if not self.folio_number or not self.company_rut or not self.document_type:
+            raise UserError("El número de folio, RUT del emisor y tipo de documento son requeridos.")
+
         try:
-            _logger.info(f"Solicitando estado al SII con: RUT={self.company_rut}, TipoDoc={self.document_type}, Folio={self.folio_number}")
-            
-            # Generar un token
-            token = self._get_token()
-            if not token:
-                raise UserError("No se pudo generar un token válido para la consulta al SII.")
-            
-            # URL del servicio para consultar el estado del DTE
-            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
-            
-            # Crear el cuerpo de la solicitud SOAP
-            soap_body = f"""
+            _logger.info(f"Consultando estado del DTE en el SII: {self.name}")
+            certificate = self._get_active_certificate()
+            token = self._get_token(certificate)
+
+            # Crear cuerpo de la solicitud SOAP
+            soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
                 <soapenv:Header/>
                 <soapenv:Body>
@@ -372,7 +331,7 @@ class InvoiceMail(models.Model):
                         <DvCompania>{self.company_rut[-1]}</DvCompania>
                         <RutReceptor>{self.partner_rut[:-2]}</RutReceptor>
                         <DvReceptor>{self.partner_rut[-1]}</DvReceptor>
-                        <TipoDte>{self.document_type}</TipoDte>
+                        <TipoDte>{self.document_type.code}</TipoDte>
                         <FolioDte>{self.folio_number}</FolioDte>
                         <FechaEmisionDte>{self.date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
                         <MontoDte>{int(self.amount_total)}</MontoDte>
@@ -381,37 +340,46 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-            
-            # Enviar la solicitud SOAP
-            http = urllib3.PoolManager()
-            headers = {'Content-Type': 'text/xml; charset=utf-8'}
-            response = http.request(
-                'POST',
-                status_url,
-                body=soap_body.encode('utf-8'),
-                headers=headers,
-            )
-            
-            if response.status != 200:
-                raise UserError("No se pudo obtener una respuesta válida del SII.")
-            
-            # Parsear la respuesta
-            response_root = etree.fromstring(response.data)
-            sii_response = response_root.find('.//SII:RESP_HDR/ESTADO', namespaces={'SII': 'http://www.sii.cl/XMLSchema'})
-            sii_status = sii_response.text if sii_response is not None else 'unknown'
-            
-            _logger.info(f"Estado recibido del SII: {sii_status}")
-            
-            # Actualizar el estado en el registro
-            self.sii_status = sii_status
-            self.message_post(
-                body=f"Estado del DTE consultado: {sii_status}",
-                subject="Consulta de Estado DTE",
-            )
+
+            # Enviar solicitud
+            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
+            response_data = self._send_soap_request(url, soap_request)
+
+            # Procesar respuesta
+            response_xml = etree.fromstring(response_data)
+            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/', 'sii': 'http://www.sii.cl/XMLSchema'}
+            estado = response_xml.xpath('//sii:ESTADO', namespaces=ns)
+            if estado:
+                self.l10n_cl_dte_status = estado[0].text
+                _logger.info(f"Estado del DTE recibido del SII: {self.l10n_cl_dte_status}")
+            else:
+                raise UserError("No se pudo determinar el estado del DTE en la respuesta del SII.")
         except Exception as e:
             _logger.error(f"Error al consultar el estado del DTE: {e}")
-            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+            raise UserError(f"Error al consultar el estado del DTE: {e}")
 
+    def _send_soap_request(self, url, soap_request):
+        """
+        Envía una solicitud SOAP al SII y procesa la respuesta.
+        """
+        headers = {
+            'Content-Type': 'text/xml; charset=utf-8',
+            'SOAPAction': ''
+        }
+        try:
+            http = self.env['l10n_cl.edi.util']._get_http()
+            response = http.request(
+                'POST',
+                url,
+                body=soap_request.encode('utf-8'),
+                headers=headers,
+            )
+            if response.status != 200:
+                raise UserError(f"Error HTTP {response.status}: {response.data.decode('utf-8')}")
+            return response.data
+        except Exception as e:
+            _logger.error(f"Error al enviar la solicitud SOAP al SII: {e}")
+            raise UserError(f"Error al enviar la solicitud SOAP al SII: {e}")
 
 
 
