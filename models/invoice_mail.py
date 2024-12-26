@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import logging
 from lxml import etree  
 import time
-import zeepss
+import zeep
 from zeep import Client, Settings
 from zeep.transports import Transport
 
