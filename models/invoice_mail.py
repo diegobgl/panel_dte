@@ -1,5 +1,4 @@
 import requests
-import urllib3
 from odoo import models, fields, api
 from odoo.tools import email_split
 from odoo.exceptions import UserError
@@ -7,10 +6,12 @@ import base64
 import xml.etree.ElementTree as ET
 import logging
 from lxml import etree  
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
 import time
+import zeep
+from zeep import Client, Settings
+from zeep.transports import Transport
+
+
 
 
 _logger = logging.getLogger(__name__)
@@ -202,47 +203,13 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        """Solicita la semilla al SII con manejo de errores."""
+        """Obtiene la semilla utilizando los recursos de Odoo."""
         try:
-            url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
-            headers = {'Content-Type': 'text/xml; charset=utf-8'}
-            soap_body = """
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:impl="http://DefaultNamespace">
-                <soapenv:Header/>
-                <soapenv:Body>
-                    <impl:getSeed/>
-                </soapenv:Body>
-            </soapenv:Envelope>
-            """
-
-            MAX_RETRIES = 3
-            for attempt in range(MAX_RETRIES):
-                response = requests.post(url, data=soap_body, headers=headers, timeout=30)
-
-                if response.status_code == 200:
-                    # Parsear la respuesta para obtener la semilla
-                    root = etree.fromstring(response.content)
-                    seed = root.find(".//{http://www.sii.cl/XMLSchema}SEMILLA").text
-                    if seed:
-                        _logger.info(f"Semilla obtenida: {seed}")
-                        return seed
-                    else:
-                        _logger.error("No se encontró la semilla en la respuesta del SII.")
-                        raise UserError("No se pudo obtener la semilla del SII.")
-                
-                elif response.status_code == 500:
-                    _logger.warning(f"Error HTTP 500 al obtener la semilla. Intento {attempt + 1} de {MAX_RETRIES}.")
-                    time.sleep(5)  # Esperar antes de reintentar
-                else:
-                    _logger.error(f"Error HTTP al obtener la semilla: {response.status_code}")
-                    raise UserError(f"Error al obtener la semilla. Código HTTP: {response.status_code}")
-
-            raise UserError("No se pudo obtener la semilla después de varios intentos.")
-
-        except requests.exceptions.RequestException as e:
-            _logger.error(f"Error de conexión al obtener la semilla: {e}")
-            raise UserError("Error de conexión al solicitar la semilla del SII.")
-
+            mode = 'SII'  # O 'SIITEST' para pruebas
+            return self.env['l10n_cl.edi.util']._get_seed(mode)
+        except Exception as e:
+            _logger.error(f"Error al obtener la semilla del SII: {e}")
+            raise UserError(_("Error al obtener la semilla del SII: %s") % e)
 
     def _sign_seed(self, seed):
         """Firma la semilla utilizando el certificado configurado en Odoo."""
@@ -366,26 +333,16 @@ class InvoiceMail(models.Model):
 
 
         
-    def _get_token(self, signed_seed):
-        """Solicitar el token utilizando la semilla firmada."""
-        url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
-        headers = {'Content-Type': 'text/xml; charset=utf-8'}
-        soap_body = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-            <soapenv:Body>
-                <getToken xmlns="https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws">
-                    <pszXml>{signed_seed}</pszXml>
-                </getToken>
-            </soapenv:Body>
-        </soapenv:Envelope>"""
-        response = requests.post(url, data=soap_body, headers=headers)
+    def _get_token(self):
+        """Obtiene el token reutilizando la lógica de Odoo."""
+        try:
+            certificate = self._get_active_certificate()
+            mode = 'SII'  # O 'SIITEST'
+            return self.env['l10n_cl.edi.util']._get_token(mode, certificate)
+        except Exception as e:
+            _logger.error(f"Error al obtener el token del SII: {e}")
+            raise UserError(_("Error al obtener el token del SII: %s") % e)
 
-        if response.status_code != 200:
-            raise UserError("Error al obtener el token del SII.")
-
-        # Parsear la respuesta para extraer el token
-        root = etree.fromstring(response.content)
-        token = root.find(".//TOKEN").text
-        return token
 
 
 
