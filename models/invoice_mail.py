@@ -198,32 +198,27 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        """
-        Obtiene la semilla desde el servicio SOAP del SII utilizando zeep.
-        """
-        try:
-            # URL del servicio para obtener la semilla
-            wsdl_url = "https://palena.sii.cl/DTEWS/CrSeed.jws?WSDL"
-            
-            # Crear cliente Zeep
-            history = HistoryPlugin()
-            settings = Settings(strict=False, xml_huge_tree=True)
-            client = Client(wsdl=wsdl_url, settings=settings, plugins=[history])
+        wsdl_url = "https://palena.sii.cl/DTEWS/CrSeed.jws?WSDL"
+        max_retries = 3
+        retry_delay = 5  # segundos
 
-            # Llamar al servicio SOAP para obtener la semilla
-            response = client.service.getSeed()
+        for attempt in range(max_retries):
+            try:
+                history = HistoryPlugin()
+                settings = Settings(strict=False, xml_huge_tree=True)
+                client = Client(wsdl=wsdl_url, settings=settings, plugins=[history])
 
-            # Parsear el XML de respuesta
-            root = etree.fromstring(response.encode('utf-8'))
-            seed = root.find('.//SEMILLA')
-            if seed is not None:
-                return seed.text
-            else:
-                raise UserError(_("La respuesta del SII no contiene la semilla esperada."))
-        except Exception as e:
-            _logger.error(f"Error al obtener la semilla del SII: {e}")
-            raise UserError(_("Error al obtener la semilla del SII: %s") % e)
-
+                response = client.service.getSeed()
+                root = etree.fromstring(response.encode('utf-8'))
+                seed = root.find('.//SEMILLA')
+                if seed is not None:
+                    return seed.text
+                else:
+                    raise UserError(_("La respuesta del SII no contiene la semilla esperada."))
+            except Exception as e:
+                _logger.warning(f"Intento {attempt + 1} de {max_retries} fallido: {e}")
+                time.sleep(retry_delay)
+        raise UserError(_("No se pudo obtener la semilla después de varios intentos."))
 
     def _sign_seed(self, seed, private_key, public_cert):
         """
