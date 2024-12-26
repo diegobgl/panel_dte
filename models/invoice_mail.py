@@ -241,6 +241,7 @@ class InvoiceMail(models.Model):
 
 
 
+
     def _get_active_certificate(self):
         """Devuelve el certificado activo o lanza una excepción."""
         certificate = self.env['l10n_cl.certificate'].search([], limit=1)
