@@ -203,21 +203,23 @@ class InvoiceMail(models.Model):
             http = urllib3.PoolManager()
             response = http.request('GET', url)
 
-            # Validar si la respuesta contiene HTML (error del servicio)
+            # Log de la respuesta
+            _logger.info(f"Respuesta del servicio CrSeed: {response.data.decode('utf-8')}")
+
+            # Validar si la respuesta contiene HTML
             if b'<html' in response.data.lower():
-                raise UserError("El servicio del SII devolvió una página HTML en lugar de un XML válido. Verifica la URL o el estado del servicio.")
+                raise UserError("El servicio del SII devolvió una página HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta XML
             root = etree.fromstring(response.data)
             seed = root.find('.//SEMILLA')
             if seed is None or not seed.text:
-                raise UserError("No se pudo obtener la semilla del SII.")
+                raise UserError("No se pudo obtener la semilla del SII. Verifique el estado del servicio.")
             return seed.text
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla del SII: {e}")
             raise UserError(f"Error al obtener la semilla del SII: {e}")
-
 
 
     def _get_active_certificate(self):
