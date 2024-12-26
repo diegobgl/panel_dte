@@ -216,6 +216,7 @@ class InvoiceMail(models.Model):
         Firma la semilla utilizando la clave privada y genera el XML firmado.
         """
         try:
+            # Firmar la semilla
             signature = private_key.sign(
                 seed.encode('utf-8'),
                 padding.PKCS1v15(),
@@ -237,6 +238,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(_("Error al firmar la semilla: %s") % e)
+
 
 
     def _get_active_certificate(self):
@@ -334,11 +336,12 @@ class InvoiceMail(models.Model):
 
             
     def _get_token(self):
+        """Obtiene un token válido desde el SII."""
         certificate = self.env['l10n_cl.certificate'].search([], limit=1)
         if not certificate or not certificate._is_valid_certificate():
             raise UserError("No se encontró un certificado válido para obtener el token.")
 
-        # Obtener datos del certificado
+        # Obtener clave privada y certificado
         cert_data = certificate._get_data()  # Devuelve (certificado_pem, objeto_certificado, clave_privada)
         private_key = cert_data[2]
         public_cert = cert_data[0]
@@ -352,6 +355,7 @@ class InvoiceMail(models.Model):
         # Enviar solicitud para obtener el token
         token = self._request_token(signed_xml)
         return token
+
 
 
 
