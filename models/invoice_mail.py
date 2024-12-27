@@ -210,7 +210,7 @@ class InvoiceMail(models.Model):
         """Consultar estado del DTE en SII usando urllib3."""
         try:
             # URL del servicio SOAP
-            url = "https://maullin.sii.cl/DTEWS/QueryEstDte.jws"
+            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
 
             # Generar un nuevo token antes de la consulta
             _logger.info("Generando token para la consulta del DTE.")
@@ -297,7 +297,7 @@ class InvoiceMail(models.Model):
         try:
             _logger.info("Generando semilla para obtener el token del SII.")
             # URL del servicio para obtener la semilla
-            seed_url = "https://maullin.sii.cl/DTEWS/CrSeed.jws"
+            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
             http = urllib3.PoolManager()
             response = http.request('GET', seed_url)
 
@@ -321,7 +321,7 @@ class InvoiceMail(models.Model):
             """
 
             # Solicitar el token al servicio del SII
-            token_url = "https://maullin.sii.cl/DTEWS/GetTokenFromSeed.jws"
+            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
             headers = {'Content-Type': 'application/xml'}
             token_response = http.request(
                 'POST',
@@ -358,7 +358,7 @@ class InvoiceMail(models.Model):
                 raise UserError("No se pudo generar un token válido para la consulta al SII.")
             
             # URL del servicio para consultar el estado del DTE
-            status_url = "https://maullin.sii.cl/DTEWS/QueryEstDte.jws"
+            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
             
             # Crear el cuerpo de la solicitud SOAP
             soap_body = f"""
