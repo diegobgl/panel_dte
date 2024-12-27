@@ -1,12 +1,12 @@
-import requests
-import urllib3
-from odoo import models, fields, api
-from odoo.tools import email_split
-from odoo.exceptions import UserError
 import base64
-import xml.etree.ElementTree as ET
 import logging
-from lxml import etree  
+import time
+from OpenSSL import crypto
+from zeep import Client, Settings
+from zeep.transports import Transport
+from requests import Session
+from odoo import models, fields, api, _
+from odoo.exceptions import UserError
 
 
 _logger = logging.getLogger(__name__)
@@ -67,7 +67,6 @@ class InvoiceMail(models.Model):
         # Store the PDF in binary field
         self.pdf_preview = base64.b64encode(pdf_content)
         return True
-
 
     @api.model
     def message_new(self, msg_dict, custom_values=None):
@@ -199,220 +198,293 @@ class InvoiceMail(models.Model):
 
 
     def _get_active_certificate(self):
-        """Devuelve el certificado activo o lanza una excepción."""
+        """
+        Obtiene el certificado activo desde el modelo l10n_cl.certificate.
+        """
         certificate = self.env['l10n_cl.certificate'].search([], limit=1)
         if not certificate:
-            raise UserError("No se encontró un certificado digital activo en el sistema.")
+            raise UserError(_("No se encontró un certificado digital activo en el sistema."))
+        if not certificate.signature_key_file or not certificate.signature_pass_phrase:
+            raise UserError(_("El certificado configurado no tiene una clave o archivo válido."))
         return certificate
 
 
-    def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
-        """Consultar estado del DTE en SII usando urllib3."""
-        try:
-            # URL del servicio SOAP
-            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
 
-            # Generar un nuevo token antes de la consulta
-            _logger.info("Generando token para la consulta del DTE.")
-            token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
+    def _get_dte_claim(self):
+        """
+        Consulta el estado de un DTE en el SII utilizando el token generado con el certificado almacenado.
+        """
+        try:
+            _logger.info(f"Solicitando estado al SII para folio {self.folio_number}.")
+
+            # Paso 1: Obtener la semilla
+            seed = self._get_seed()
+
+            # Paso 2: Firmar la semilla con el certificado activo
+            signed_seed = self._get_signed_seed(seed)
+
+            # Paso 3: Obtener el token
+            token = self._request_token(signed_seed)
             if not token:
                 raise UserError("No se pudo generar un token válido para la consulta al SII.")
 
-            # Separar RUT y dígito verificador
-            rut_emisor = str(company_vat[:-2])
-            dv_emisor = str(company_vat[-1])
-            rut_receptor = str(self.partner_rut[:-2])
-            dv_receptor = str(self.partner_rut[-1])
-            rut_consultante = str(company_vat[:-2])
-            dv_consultante = str(company_vat[-1])
+            # Paso 4: Configurar cliente SOAP para consultar el estado del DTE
+            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"
+            session = requests.Session()
+            transport = Transport(session=session)
+            settings = Settings(strict=False, xml_huge_tree=True)
+            client = Client(url, transport=transport, settings=settings)
 
-            # Crear el cuerpo del XML para la solicitud SOAP
-            soap_request = f"""
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
-            <soapenv:Header/>
-            <soapenv:Body>
-                <dte:getEstDte>
-                    <RutConsultante>{rut_consultante}</RutConsultante>
-                    <DvConsultante>{dv_consultante}</DvConsultante>
-                    <RutCompania>{rut_emisor}</RutCompania>
-                    <DvCompania>{dv_emisor}</DvCompania>
-                    <RutReceptor>{rut_receptor}</RutReceptor>
-                    <DvReceptor>{dv_receptor}</DvReceptor>
-                    <TipoDte>{document_type_code}</TipoDte>
-                    <FolioDte>{document_number}</FolioDte>
-                    <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
-                    <MontoDte>{int(amount_total)}</MontoDte>
-                    <Token>{token}</Token>
-                </dte:getEstDte>
-            </soapenv:Body>
-            </soapenv:Envelope>
-            """
-
-            _logger.info(f"Enviando solicitud al SII con los siguientes parámetros:\n{soap_request}")
-
-            # Configurar urllib3
-            http = urllib3.PoolManager()
-            headers = {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': ''
+            # Paso 5: Preparar los parámetros de la consulta
+            rut_emisor, dv_emisor = self.company_rut.split('-')
+            rut_receptor, dv_receptor = self.partner_rut.split('-')
+            params = {
+                "RutConsultante": rut_emisor,
+                "DvConsultante": dv_emisor,
+                "RutCompania": rut_emisor,
+                "DvCompania": dv_emisor,
+                "RutReceptor": rut_receptor,
+                "DvReceptor": dv_receptor,
+                "TipoDte": self.document_type.code,
+                "FolioDte": self.folio_number,
+                "FechaEmisionDte": self.date_emission.strftime('%Y-%m-%d'),
+                "MontoDte": int(self.amount_total),
+                "Token": token,
             }
 
-            # Enviar la solicitud
-            response = http.request(
-                'POST',
-                url,
-                body=soap_request.encode('utf-8'),
-                headers=headers
-            )
+            # Paso 6: Realizar la consulta al SII
+            _logger.info(f"Enviando solicitud al SII con los parámetros: {params}")
+            response = client.service.getEstDte(**params)
 
-            # Validar el código de respuesta HTTP
-            if response.status != 200:
-                _logger.error(f"Error HTTP al consultar el estado del DTE: {response.status}")
-                raise UserError(f"Error HTTP al consultar el estado del DTE: {response.status}")
+            # Paso 7: Procesar la respuesta del SII
+            if response and hasattr(response, 'EstadoDTE'):
+                estado_dte = response.EstadoDTE
+                glosa_estado = response.GlosaEstado
+                _logger.info(f"Estado del DTE obtenido: {estado_dte}, Glosa: {glosa_estado}")
 
-            # Parsear la respuesta SOAP
-            response_xml = etree.fromstring(response.data)
-            _logger.info(f"Respuesta completa del SII: {etree.tostring(response_xml, pretty_print=True).decode()}")
-
-            # Extraer el estado del DTE desde la respuesta
-            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                'sii': 'http://www.sii.cl/XMLSchema'}
-            estado = response_xml.xpath('//sii:ESTADO', namespaces=ns)
-            glosa = response_xml.xpath('//sii:GLOSA', namespaces=ns)
-
-            if estado and estado[0].text == '001':
-                _logger.error(f"Error del SII: {glosa[0].text if glosa else 'TOKEN NO EXISTE'}")
-                raise UserError(f"Error del SII: {glosa[0].text if glosa else 'TOKEN NO EXISTE'}")
-
-            return estado[0].text if estado else None
+                # Actualizar el estado en el modelo
+                self.l10n_cl_dte_status = estado_dte
+                self.message_post(
+                    body=f"Estado del DTE consultado: {estado_dte} - {glosa_estado}",
+                    subject="Consulta de Estado DTE",
+                    message_type='notification'
+                )
+                return estado_dte, glosa_estado
+            else:
+                _logger.error(f"Respuesta inválida del SII: {response}")
+                raise UserError(_("No se pudo obtener el estado del DTE desde el SII."))
 
         except Exception as e:
-            _logger.error(f"Error general al consultar el estado del DTE: {e}")
-            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+            _logger.error(f"Error al consultar el estado del DTE en el SII: {e}")
+            raise UserError(_("Error al consultar el estado del DTE en el SII: %s") % e)
 
 
     
-    def _get_token(self):
-        """Genera un token válido desde el SII."""
+
+    def check_sii_status(self):
+        """
+        Flujo completo para consultar el estado del DTE en el SII:
+        1. Obtener la semilla.
+        2. Firmar la semilla con el certificado activo.
+        3. Solicitar el token usando la semilla firmada.
+        4. Consultar el estado del DTE en el SII utilizando el token.
+        """
         try:
-            _logger.info("Generando semilla para obtener el token del SII.")
-            # URL del servicio para obtener la semilla
-            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
-            http = urllib3.PoolManager()
-            response = http.request('GET', seed_url)
+            _logger.info(f"Solicitando estado al SII para folio {self.folio_number}.")
 
-            # Verificar si la respuesta contiene HTML
-            if b'<html' in response.data.lower():
-                _logger.error(f"El servicio devolvió una página HTML en lugar de un XML válido: {response.data.decode('utf-8')}")
-                raise UserError("El servicio del SII devolvió una respuesta inesperada. Verifique la URL o el estado del servicio.")
+            # Paso 1: Obtener la semilla
+            seed = self._get_seed()
 
-            # Parsear la respuesta y extraer la semilla
-            root = etree.fromstring(response.data)
-            seed = root.find('.//SEMILLA').text
-            _logger.info(f"Semilla obtenida: {seed}")
+            # Paso 2: Firmar la semilla
+            signed_seed = self._get_signed_seed(seed)
 
-            # Crear el XML firmado para obtener el token
-            signed_seed = f"""
+            # Paso 3: Obtener el token
+            token = self._request_token(signed_seed)
+            if not token:
+                raise UserError("No se pudo generar un token válido para la consulta al SII.")
+
+            # Paso 4: Consultar el estado del DTE en el SII
+            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws?WSDL"
+
+            # Configurar cliente Zeep para la consulta
+            session = Session()
+            transport = Transport(session=session, timeout=10)
+            settings = Settings(strict=False, xml_huge_tree=True)
+            client = Client(url, settings=settings, transport=transport)
+
+            # Crear parámetros para la consulta
+            rut_emisor, dv_emisor = self.company_rut.split('-')
+            rut_receptor, dv_receptor = self.partner_rut.split('-')
+            params = {
+                "RutConsultante": rut_emisor,
+                "DvConsultante": dv_emisor,
+                "RutCompania": rut_emisor,
+                "DvCompania": dv_emisor,
+                "RutReceptor": rut_receptor,
+                "DvReceptor": dv_receptor,
+                "TipoDte": self.document_type.code,
+                "FolioDte": self.folio_number,
+                "FechaEmisionDte": self.date_emission.strftime('%Y-%m-%d'),
+                "MontoDte": int(self.amount_total),
+                "Token": token,
+            }
+
+            # Realizar la consulta
+            _logger.info(f"Enviando solicitud de consulta al SII con parámetros: {params}")
+            response = client.service.getEstDte(**params)
+
+            # Procesar la respuesta
+            if response and hasattr(response, 'EstadoDTE'):
+                estado_dte = response.EstadoDTE
+                glosa_estado = response.GlosaEstado
+                _logger.info(f"Estado del DTE obtenido: {estado_dte}, Glosa: {glosa_estado}")
+
+                # Actualizar el estado en el modelo
+                self.l10n_cl_dte_status = estado_dte
+                self.message_post(
+                    body=f"Estado del DTE consultado: {estado_dte} - {glosa_estado}",
+                    subject="Consulta de Estado DTE",
+                    message_type='notification'
+                )
+            else:
+                _logger.error(f"Respuesta inválida del SII: {response}")
+                raise UserError(_("No se pudo obtener el estado del DTE desde el SII."))
+
+        except Exception as e:
+            _logger.error(f"Error al consultar el estado del DTE en el SII: {e}")
+            raise UserError(_("Error al consultar el estado del DTE en el SII: %s") % e)
+
+
+    def _get_seed(self):
+        """
+        Solicita la semilla al servicio del SII.
+        Utiliza reintentos en caso de errores temporales.
+        """
+        url = "https://palena.sii.cl/DTEWS/CrSeed.jws?WSDL"
+        max_retries = 5
+        retry_delay = 5  # Tiempo de espera entre reintentos (en segundos)
+
+        for attempt in range(max_retries):
+            try:
+                # Configurar cliente Zeep
+                session = Session()
+                transport = Transport(session=session, timeout=10)
+                settings = Settings(strict=False, xml_huge_tree=True)
+                client = Client(url, settings=settings, transport=transport)
+
+                # Realizar la solicitud al servicio
+                _logger.info(f"Realizando solicitud de semilla al SII. Intento {attempt + 1} de {max_retries}.")
+                response = client.service.getSeed()
+
+                if response:
+                    # Validar y retornar la semilla
+                    _logger.info(f"Semilla obtenida correctamente: {response}")
+                    return response
+                else:
+                    raise UserError(_("No se pudo obtener la semilla del SII."))
+
+            except Exception as e:
+                _logger.error(f"Error al obtener la semilla en el intento {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)  # Esperar antes de reintentar
+                else:
+                    raise UserError(_("No se pudo obtener la semilla después de varios intentos: %s") % e)
+
+
+    def _get_signed_seed(self, seed):
+        """
+        Firma la semilla utilizando el certificado almacenado en Odoo.
+        """
+        certificate = self._get_active_certificate()
+
+        try:
+            # Obtener clave privada y certificado desde el modelo l10n_cl.certificate
+            p12 = crypto.load_pkcs12(
+                base64.b64decode(certificate.signature_key_file),
+                certificate.signature_pass_phrase.encode('utf-8')
+            )
+            private_key = p12.get_privatekey()
+            cert = p12.get_certificate()
+
+            # Crear la firma digital de la semilla
+            signed_info = crypto.sign(private_key, seed.encode('utf-8'), 'sha1')
+
+            # Construir el XML firmado
+            signed_xml = f"""
             <getToken>
                 <item>
                     <Semilla>{seed}</Semilla>
                 </item>
+                <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+                    <SignedInfo>
+                        <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+                        <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+                        <Reference URI="\">
+                            <Transforms>
+                                <Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+                            </Transforms>
+                            <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+                            <DigestValue></DigestValue>
+                        </Reference>
+                    </SignedInfo>
+                    <SignatureValue>{base64.b64encode(signed_info).decode('utf-8')}</SignatureValue>
+                    <KeyInfo>
+                        <X509Data>
+                            <X509Certificate>{base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')}</X509Certificate>
+                        </X509Data>
+                    </KeyInfo>
+                </Signature>
             </getToken>
             """
-
-            # Solicitar el token al servicio del SII
-            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
-            headers = {'Content-Type': 'application/xml'}
-            token_response = http.request(
-                'POST',
-                token_url,
-                body=signed_seed.encode('utf-8'),
-                headers=headers,
-            )
-
-            # Verificar si la respuesta contiene HTML
-            if b'<html' in token_response.data.lower():
-                _logger.error(f"El servicio devolvió una página HTML en lugar de un XML válido al solicitar el token: {token_response.data.decode('utf-8')}")
-                raise UserError("El servicio del SII devolvió una respuesta inesperada al solicitar el token. Verifique la URL o el estado del servicio.")
-
-            # Parsear la respuesta y extraer el token
-            token_root = etree.fromstring(token_response.data.strip())
-            token = token_root.find('.//TOKEN').text
-            _logger.info(f"Token obtenido correctamente: {token}")
-            return token
+            _logger.info(f"Semilla firmada correctamente.")
+            return signed_xml
 
         except Exception as e:
-            _logger.error(f"Error al obtener el token: {e}")
-            raise UserError(f"Error al obtener el token del SII: {e}")
+            _logger.error(f"Error al firmar la semilla: {e}")
+            raise UserError(_("Error al firmar la semilla: %s") % e)
 
 
-    def check_sii_status(self):
-        """Consulta el estado del DTE en el SII."""
-        self.ensure_one()
+    def _request_token(self, signed_seed):
+        """
+        Envía la semilla firmada al servicio del SII para obtener el token.
+        """
+        url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws?WSDL"
         try:
-            _logger.info(f"Solicitando estado al SII con: RUT={self.company_rut}, TipoDoc={self.document_type}, Folio={self.folio_number}")
-            
-            # Generar un token
-            token = self._get_token()
-            if not token:
-                raise UserError("No se pudo generar un token válido para la consulta al SII.")
-            
-            # URL del servicio para consultar el estado del DTE
-            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
-            
-            # Crear el cuerpo de la solicitud SOAP
-            soap_body = f"""
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
-                <soapenv:Header/>
-                <soapenv:Body>
-                    <dte:getEstDte>
-                        <RutConsultante>{self.company_rut[:-2]}</RutConsultante>
-                        <DvConsultante>{self.company_rut[-1]}</DvConsultante>
-                        <RutCompania>{self.company_rut[:-2]}</RutCompania>
-                        <DvCompania>{self.company_rut[-1]}</DvCompania>
-                        <RutReceptor>{self.partner_rut[:-2]}</RutReceptor>
-                        <DvReceptor>{self.partner_rut[-1]}</DvReceptor>
-                        <TipoDte>{self.document_type}</TipoDte>
-                        <FolioDte>{self.folio_number}</FolioDte>
-                        <FechaEmisionDte>{self.date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
-                        <MontoDte>{int(self.amount_total)}</MontoDte>
-                        <Token>{token}</Token>
-                    </dte:getEstDte>
-                </soapenv:Body>
-            </soapenv:Envelope>
-            """
-            
-            # Enviar la solicitud SOAP
-            http = urllib3.PoolManager()
-            headers = {'Content-Type': 'text/xml; charset=utf-8'}
-            response = http.request(
-                'POST',
-                status_url,
-                body=soap_body.encode('utf-8'),
-                headers=headers,
-            )
-            
-            if response.status != 200:
-                raise UserError("No se pudo obtener una respuesta válida del SII.")
-            
-            # Parsear la respuesta
-            response_root = etree.fromstring(response.data)
-            sii_response = response_root.find('.//SII:RESP_HDR/ESTADO', namespaces={'SII': 'http://www.sii.cl/XMLSchema'})
-            sii_status = sii_response.text if sii_response is not None else 'unknown'
-            
-            _logger.info(f"Estado recibido del SII: {sii_status}")
-            
-            # Actualizar el estado en el registro
-            self.sii_status = sii_status
-            self.message_post(
-                body=f"Estado del DTE consultado: {sii_status}",
-                subject="Consulta de Estado DTE",
-            )
+            # Configurar cliente Zeep
+            session = Session()
+            transport = Transport(session=session, timeout=10)
+            settings = Settings(strict=False, xml_huge_tree=True)
+            client = Client(url, settings=settings, transport=transport)
+
+            # Enviar la semilla firmada
+            response = client.service.getToken(signed_seed)
+
+            if response:
+                _logger.info(f"Token obtenido correctamente: {response}")
+                return response
+            else:
+                raise UserError(_("No se pudo obtener el token del SII."))
         except Exception as e:
-            _logger.error(f"Error al consultar el estado del DTE: {e}")
-            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+            _logger.error(f"Error al solicitar el token: {e}")
+            raise UserError(_("Error al solicitar el token: %s") % e)
 
+    def get_token(self):
+        """
+        Flujo completo: obtener semilla, firmarla y solicitar el token.
+        """
+        try:
+            # Paso 1: Obtener la semilla
+            seed = self._get_seed()
 
+            # Paso 2: Firmar la semilla
+            signed_seed = self._get_signed_seed(seed)
+
+            # Paso 3: Solicitar el token al SII
+            token = self._request_token(signed_seed)
+            return token
+        except Exception as e:
+            _logger.error(f"Error en el proceso de obtención del token: {e}")
+            raise UserError(_("Error en el proceso de obtención del token: %s") % e)
 
 
 
