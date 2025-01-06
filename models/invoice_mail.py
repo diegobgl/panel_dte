@@ -305,21 +305,23 @@ class InvoiceMail(models.Model):
             http = urllib3.PoolManager()
             response = http.request('GET', seed_url)
 
-            # Verificar si la respuesta contiene HTML
+            # Verificar si la respuesta contiene HTML (indicador de error del servicio)
             if b'<html' in response.data.lower():
-                _logger.error(f"El servicio devolvió una página HTML en lugar de un XML válido: {response.data.decode('utf-8')}")
+                _logger.error(f"El servicio devolvió HTML en lugar de XML válido: {response.data.decode('utf-8')}")
                 raise UserError("El servicio del SII devolvió una respuesta inesperada. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta y extraer la semilla
             root = etree.fromstring(response.data)
-            seed = root.find('.//SEMILLA').text
-            _logger.info(f"Semilla obtenida: {seed}")
+            seed = root.find('.//SEMILLA')
+            if seed is None:
+                raise UserError("No se pudo encontrar la semilla en la respuesta del SII.")
+            _logger.info(f"Semilla obtenida: {seed.text}")
 
             # Crear el XML firmado para obtener el token
             signed_seed = f"""
             <getToken>
                 <item>
-                    <Semilla>{seed}</Semilla>
+                    <Semilla>{seed.text}</Semilla>
                 </item>
             </getToken>
             """
@@ -334,20 +336,23 @@ class InvoiceMail(models.Model):
                 headers=headers,
             )
 
-            # Verificar si la respuesta contiene HTML
+            # Validar la respuesta del token
             if b'<html' in token_response.data.lower():
-                _logger.error(f"El servicio devolvió una página HTML en lugar de un XML válido al solicitar el token: {token_response.data.decode('utf-8')}")
+                _logger.error(f"El servicio devolvió HTML en lugar de XML válido al solicitar el token: {token_response.data.decode('utf-8')}")
                 raise UserError("El servicio del SII devolvió una respuesta inesperada al solicitar el token. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta y extraer el token
             token_root = etree.fromstring(token_response.data.strip())
-            token = token_root.find('.//TOKEN').text
-            _logger.info(f"Token obtenido correctamente: {token}")
-            return token
+            token = token_root.find('.//TOKEN')
+            if token is None:
+                raise UserError("No se pudo encontrar el token en la respuesta del SII.")
+            _logger.info(f"Token obtenido correctamente: {token.text}")
+            return token.text
 
         except Exception as e:
             _logger.error(f"Error al obtener el token: {e}")
             raise UserError(f"Error al obtener el token del SII: {e}")
+
 
 
     def check_sii_status(self):
@@ -360,9 +365,6 @@ class InvoiceMail(models.Model):
             token = self._get_token()
             if not token:
                 raise UserError("No se pudo generar un token válido para la consulta al SII.")
-            
-            # URL del servicio para consultar el estado del DTE
-            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
             
             # Crear el cuerpo de la solicitud SOAP
             soap_body = f"""
@@ -391,16 +393,17 @@ class InvoiceMail(models.Model):
             headers = {'Content-Type': 'text/xml; charset=utf-8'}
             response = http.request(
                 'POST',
-                status_url,
+                "https://palena.sii.cl/DTEWS/QueryEstDte.jws",
                 body=soap_body.encode('utf-8'),
                 headers=headers,
             )
             
             if response.status != 200:
+                _logger.error(f"Error HTTP al consultar el estado del DTE: {response.status}")
                 raise UserError("No se pudo obtener una respuesta válida del SII.")
             
-            # Parsear la respuesta
-            response_root = etree.fromstring(response.data)
+            # Validar y parsear la respuesta
+            response_root = validate_xml_response(response.data)
             sii_response = response_root.find('.//SII:RESP_HDR/ESTADO', namespaces={'SII': 'http://www.sii.cl/XMLSchema'})
             sii_status = sii_response.text if sii_response is not None else 'unknown'
             
@@ -416,6 +419,13 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
+    def validate_xml_response(response_data):
+        try:
+            root = etree.fromstring(response_data)
+            return root
+        except etree.XMLSyntaxError as e:
+            _logger.error(f"El XML de respuesta no es válido: {e}")
+            raise UserError("El XML recibido del SII no es válido. Verifique la respuesta del servicio.")
 
 
 
