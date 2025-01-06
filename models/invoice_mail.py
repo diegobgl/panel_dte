@@ -293,7 +293,7 @@ class InvoiceMail(models.Model):
 
         
     def _get_token(self):
-        """Genera un token válido desde el SII."""
+        """Genera un token válido desde el SII y registra el XML en el chatter."""
         try:
             _logger.info("Generando semilla para obtener el token del SII.")
             
@@ -305,6 +305,12 @@ class InvoiceMail(models.Model):
             # Validar si la respuesta contiene HTML
             if b'<html' in response.data.lower():
                 _logger.error(f"Respuesta inesperada del servicio de semilla: {response.data.decode('utf-8')}")
+                self.message_post(
+                    body=f"<b>Error al obtener la semilla:</b><br/><pre>{response.data.decode('utf-8')}</pre>",
+                    subject="Error al Obtener la Semilla",
+                    message_type='comment',
+                    subtype_xmlid='mail.mt_note',
+                )
                 raise UserError("El servicio del SII devolvió HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta para extraer la semilla
@@ -313,6 +319,14 @@ class InvoiceMail(models.Model):
             if seed is None:
                 raise UserError("No se pudo encontrar la semilla en la respuesta del SII.")
             _logger.info(f"Semilla obtenida: {seed.text}")
+
+            # Registrar la semilla en el Chatter
+            self.message_post(
+                body=f"<b>Semilla Obtenida:</b><br/><pre>{seed.text}</pre>",
+                subject="Semilla Obtenida",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
 
             # Crear el XML firmado para obtener el token
             signed_seed = f"""
@@ -323,8 +337,13 @@ class InvoiceMail(models.Model):
             </getToken>
             """
 
-            # Registrar el XML generado en los logs
-            _logger.info(f"XML generado para solicitud de token:\n{signed_seed}")
+            # Registrar el XML generado en el Chatter
+            self.message_post(
+                body=f"<b>XML Generado para Solicitud de Token:</b><br/><pre>{signed_seed}</pre>",
+                subject="XML Generado",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
 
             # Solicitar el token
             token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"  # URL correcta para obtener el token
@@ -339,6 +358,12 @@ class InvoiceMail(models.Model):
             # Validar si la respuesta contiene HTML
             if b'<html' in token_response.data.lower():
                 _logger.error(f"Respuesta inesperada del servicio de token: {token_response.data.decode('utf-8')}")
+                self.message_post(
+                    body=f"<b>Error al obtener el token:</b><br/><pre>{token_response.data.decode('utf-8')}</pre>",
+                    subject="Error al Obtener el Token",
+                    message_type='comment',
+                    subtype_xmlid='mail.mt_note',
+                )
                 raise UserError("El servicio del SII devolvió HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta para extraer el token
@@ -347,6 +372,15 @@ class InvoiceMail(models.Model):
             if token is None:
                 raise UserError("No se pudo encontrar el token en la respuesta del SII.")
             _logger.info(f"Token obtenido correctamente: {token.text}")
+
+            # Registrar el token en el Chatter
+            self.message_post(
+                body=f"<b>Token Obtenido:</b><br/><pre>{token.text}</pre>",
+                subject="Token Obtenido",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
             return token.text
 
         except Exception as e:
