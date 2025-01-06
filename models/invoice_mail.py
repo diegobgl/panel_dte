@@ -298,19 +298,16 @@ class InvoiceMail(models.Model):
             _logger.info("Generando semilla para obtener el token del SII.")
             
             # URL del servicio para obtener la semilla
-            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"  # URL correcta para obtener la semilla
             http = urllib3.PoolManager()
             response = http.request('GET', seed_url)
 
-            # Registrar la respuesta cruda
-            _logger.info(f"Respuesta obtenida del SII (semilla): {response.data.decode('utf-8')}")
-
-            # Verificar si la respuesta contiene HTML
+            # Validar si la respuesta contiene HTML
             if b'<html' in response.data.lower():
-                _logger.error("El servicio devolvió una página HTML en lugar de XML válido.")
-                raise UserError("El servicio del SII devolvió una respuesta inesperada. Verifique la URL o el estado del servicio.")
+                _logger.error(f"Respuesta inesperada del servicio de semilla: {response.data.decode('utf-8')}")
+                raise UserError("El servicio del SII devolvió HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
 
-            # Parsear la respuesta y extraer la semilla
+            # Parsear la respuesta para extraer la semilla
             root = etree.fromstring(response.data)
             seed = root.find('.//SEMILLA')
             if seed is None:
@@ -325,13 +322,12 @@ class InvoiceMail(models.Model):
                 </item>
             </getToken>
             """
-            
-            # Registrar el XML generado
-            _logger.info(f"XML generado para solicitud de token:\n{signed_seed}")
-            self.post_xml_to_chatter(signed_seed, description="XML generado para solicitud de Token")
 
-            # Solicitar el token al servicio del SII
-            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+            # Registrar el XML generado en los logs
+            _logger.info(f"XML generado para solicitud de token:\n{signed_seed}")
+
+            # Solicitar el token
+            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"  # URL correcta para obtener el token
             headers = {'Content-Type': 'application/xml'}
             token_response = http.request(
                 'POST',
@@ -340,15 +336,12 @@ class InvoiceMail(models.Model):
                 headers=headers,
             )
 
-            # Registrar la respuesta del token
-            _logger.info(f"Respuesta obtenida del SII (token): {token_response.data.decode('utf-8')}")
-
-            # Verificar si la respuesta contiene HTML
+            # Validar si la respuesta contiene HTML
             if b'<html' in token_response.data.lower():
-                _logger.error("El servicio devolvió una página HTML en lugar de XML válido al solicitar el token.")
-                raise UserError("El servicio del SII devolvió una respuesta inesperada al solicitar el token. Verifique la URL o el estado del servicio.")
+                _logger.error(f"Respuesta inesperada del servicio de token: {token_response.data.decode('utf-8')}")
+                raise UserError("El servicio del SII devolvió HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
 
-            # Parsear la respuesta y extraer el token
+            # Parsear la respuesta para extraer el token
             token_root = etree.fromstring(token_response.data.strip())
             token = token_root.find('.//TOKEN')
             if token is None:
@@ -359,6 +352,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener el token: {e}")
             raise UserError(f"Error al obtener el token del SII: {e}")
+
 
     def check_sii_status(self):
         """Consulta el estado del DTE en el SII."""
