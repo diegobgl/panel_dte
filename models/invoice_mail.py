@@ -292,114 +292,92 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
         
-    def _get_token(self):
-        """Genera un token válido desde el SII y registra el XML en el chatter."""
+    def _get_token(self, signed_seed):
+        """Envía la semilla firmada al SII para obtener el token usando HTTPS."""
+        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+        http = urllib3.PoolManager()
         try:
-            _logger.info("Generando semilla para obtener el token del SII.")
-            
-            # URL del servicio para obtener la semilla
-            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"  # URL correcta para obtener la semilla
-            http = urllib3.PoolManager()
-            response = http.request('GET', seed_url)
-
-            # Validar si la respuesta contiene HTML
+            headers = {'Content-Type': 'application/xml'}
+            body = f"""
+            <getToken>
+                <item>
+                    <Semilla>{signed_seed}</Semilla>
+                </item>
+            </getToken>
+            """
+            response = http.request('POST', token_url, body=body.encode('utf-8'), headers=headers)
             if b'<html' in response.data.lower():
-                _logger.error(f"Respuesta inesperada del servicio de semilla: {response.data.decode('utf-8')}")
-                self.message_post(
-                    body=f"<b>Error al obtener la semilla:</b><br/><pre>{response.data.decode('utf-8')}</pre>",
-                    subject="Error al Obtener la Semilla",
-                    message_type='comment',
-                    subtype_xmlid='mail.mt_note',
-                )
-                raise UserError("El servicio del SII devolvió HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
+                _logger.error("Respuesta HTML inesperada al solicitar el token.")
+                raise UserError("El servicio del SII devolvió una respuesta HTML en lugar de XML.")
+            root = etree.fromstring(response.data)
+            token = root.find('.//TOKEN')
+            if token is None:
+                raise UserError("No se pudo encontrar el token en la respuesta del SII.")
+            return token.text
+        except Exception as e:
+            _logger.error(f"Error al obtener el token desde el SII: {e}")
+            raise UserError("Error al obtener el token desde el SII.")
 
-            # Parsear la respuesta para extraer la semilla
+    def _get_seed(self):
+        """Solicita la semilla desde el SII usando HTTPS."""
+        seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+        http = urllib3.PoolManager()
+        try:
+            response = http.request('GET', seed_url)
+            if b'<html' in response.data.lower():
+                _logger.error("Respuesta HTML inesperada al solicitar la semilla.")
+                raise UserError("El servicio del SII devolvió una respuesta HTML en lugar de XML.")
             root = etree.fromstring(response.data)
             seed = root.find('.//SEMILLA')
             if seed is None:
                 raise UserError("No se pudo encontrar la semilla en la respuesta del SII.")
-            _logger.info(f"Semilla obtenida: {seed.text}")
-
-            # Registrar la semilla en el Chatter
-            self.message_post(
-                body=f"<b>Semilla Obtenida:</b><br/><pre>{seed.text}</pre>",
-                subject="Semilla Obtenida",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
-
-            # Crear el XML firmado para obtener el token
-            signed_seed = f"""
-            <getToken>
-                <item>
-                    <Semilla>{seed.text}</Semilla>
-                </item>
-            </getToken>
-            """
-
-            # Registrar el XML generado en el Chatter
-            self.message_post(
-                body=f"<b>XML Generado para Solicitud de Token:</b><br/><pre>{signed_seed}</pre>",
-                subject="XML Generado",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
-
-            # Solicitar el token
-            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"  # URL correcta para obtener el token
-            headers = {'Content-Type': 'application/xml'}
-            token_response = http.request(
-                'POST',
-                token_url,
-                body=signed_seed.encode('utf-8'),
-                headers=headers,
-            )
-
-            # Validar si la respuesta contiene HTML
-            if b'<html' in token_response.data.lower():
-                _logger.error(f"Respuesta inesperada del servicio de token: {token_response.data.decode('utf-8')}")
-                self.message_post(
-                    body=f"<b>Error al obtener el token:</b><br/><pre>{token_response.data.decode('utf-8')}</pre>",
-                    subject="Error al Obtener el Token",
-                    message_type='comment',
-                    subtype_xmlid='mail.mt_note',
-                )
-                raise UserError("El servicio del SII devolvió HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
-
-            # Parsear la respuesta para extraer el token
-            token_root = etree.fromstring(token_response.data.strip())
-            token = token_root.find('.//TOKEN')
-            if token is None:
-                raise UserError("No se pudo encontrar el token en la respuesta del SII.")
-            _logger.info(f"Token obtenido correctamente: {token.text}")
-
-            # Registrar el token en el Chatter
-            self.message_post(
-                body=f"<b>Token Obtenido:</b><br/><pre>{token.text}</pre>",
-                subject="Token Obtenido",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
-
-            return token.text
-
+            return seed.text
         except Exception as e:
-            _logger.error(f"Error al obtener el token: {e}")
-            raise UserError(f"Error al obtener el token del SII: {e}")
+            _logger.error(f"Error al obtener la semilla desde el SII: {e}")
+            raise UserError("Error al obtener la semilla desde el SII.")
+
+    def _sign_seed(self, seed):
+        """Firma la semilla utilizando el certificado digital configurado."""
+        certificate = self._get_active_certificate()
+        try:
+            p12 = crypto.load_pkcs12(
+                base64.b64decode(certificate.signature_key_file),
+                certificate.signature_pass_phrase.encode('utf-8')
+            )
+            private_key = p12.get_privatekey()
+            signed_seed = crypto.sign(private_key, seed.encode('utf-8'), 'sha1')
+            return signed_seed
+        except Exception as e:
+            _logger.error(f"Error al firmar la semilla: {e}")
+            raise UserError("Error al firmar la semilla.")
 
 
     def check_sii_status(self):
-        """Consulta el estado del DTE en el SII."""
+        """
+        Consulta el estado del DTE en el SII utilizando las funciones indicadas:
+        - Solicita la semilla
+        - Firma la semilla
+        - Envía la semilla firmada y obtiene el token
+        - Realiza la consulta del estado del DTE con el token
+        """
         self.ensure_one()
         try:
-            _logger.info(f"Solicitando estado al SII con: RUT={self.company_rut}, TipoDoc={self.document_type}, Folio={self.folio_number}")
-            
-            # Generar un token
-            token = self._get_token()
-            if not token:
-                raise UserError("No se pudo generar un token válido para la consulta al SII.")
-            
-            # Crear el cuerpo de la solicitud SOAP
+            _logger.info(f"Consultando el estado del DTE en el SII para el RUT: {self.company_rut}, TipoDoc: {self.document_type}, Folio: {self.folio_number}")
+
+            # 1. Solicitar la semilla
+            seed = self._get_seed()
+            _logger.info(f"Semilla obtenida: {seed}")
+
+            # 2. Firmar la semilla
+            signed_seed = self._sign_seed(seed)
+            _logger.info(f"Semilla firmada correctamente.")
+
+            # 3. Obtener el token
+            token = self._get_token(signed_seed)
+            _logger.info(f"Token obtenido correctamente: {token}")
+
+            # 4. Consultar el estado del DTE usando el token
+            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
             soap_body = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
                 <soapenv:Header/>
@@ -420,34 +398,52 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-            self.post_xml_to_chatter(soap_body, description="XML generado para consulta del estado del DTE")
 
-            # Enviar la solicitud SOAP
+            # Registrar el XML generado en el chatter
+            self.message_post(
+                body=f"<b>Solicitud de estado del DTE:</b><br/><pre>{soap_body}</pre>",
+                subject="Solicitud de Estado DTE",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
+            # 5. Enviar la solicitud al SII
             http = urllib3.PoolManager()
             headers = {'Content-Type': 'text/xml; charset=utf-8'}
             response = http.request(
                 'POST',
-                "https://palena.sii.cl/DTEWS/QueryEstDte.jws",
+                status_url,
                 body=soap_body.encode('utf-8'),
                 headers=headers,
             )
-            
+
+            # Validar la respuesta HTTP
             if response.status != 200:
                 _logger.error(f"Error HTTP al consultar el estado del DTE: {response.status}")
-                raise UserError("No se pudo obtener una respuesta válida del SII.")
-            
-            # Validar y parsear la respuesta
-            response_root = validate_xml_response(response.data)
+                raise UserError(f"Error HTTP al consultar el estado del DTE: {response.status}. Verifique la URL o el estado del servicio.")
+
+            # Parsear la respuesta
+            response_root = etree.fromstring(response.data)
             sii_response = response_root.find('.//SII:RESP_HDR/ESTADO', namespaces={'SII': 'http://www.sii.cl/XMLSchema'})
             sii_status = sii_response.text if sii_response is not None else 'unknown'
-            
-            _logger.info(f"Estado recibido del SII: {sii_status}")
-            
+
+            # Registrar la respuesta en el chatter
+            self.message_post(
+                body=f"<b>Respuesta del SII:</b><br/><pre>{etree.tostring(response_root, pretty_print=True).decode()}</pre>",
+                subject="Respuesta de Estado DTE",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
+            _logger.info(f"Estado del DTE recibido del SII: {sii_status}")
+
             # Actualizar el estado en el registro
-            self.sii_status = sii_status
+            self.l10n_cl_dte_status = sii_status
             self.message_post(
                 body=f"Estado del DTE consultado: {sii_status}",
                 subject="Consulta de Estado DTE",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
             )
         except Exception as e:
             _logger.error(f"Error al consultar el estado del DTE: {e}")
