@@ -330,6 +330,9 @@ class InvoiceMail(models.Model):
             </getToken>
             """
 
+            # Registrar el XML generado
+            _logger.info(f"XML generado para solicitud de token:\n{signed_seed}")
+
             # Solicitar el token al servicio del SII
             token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
             headers = {'Content-Type': 'application/xml'}
