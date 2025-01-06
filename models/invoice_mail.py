@@ -295,19 +295,23 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
 
-    
+        
     def _get_token(self):
         """Genera un token válido desde el SII."""
         try:
             _logger.info("Generando semilla para obtener el token del SII.")
+            
             # URL del servicio para obtener la semilla
             seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
             http = urllib3.PoolManager()
             response = http.request('GET', seed_url)
 
-            # Verificar si la respuesta contiene HTML (indicador de error del servicio)
+            # Registrar la respuesta cruda
+            _logger.info(f"Respuesta obtenida del SII (semilla): {response.data.decode('utf-8')}")
+
+            # Verificar si la respuesta contiene HTML
             if b'<html' in response.data.lower():
-                _logger.error(f"El servicio devolvió HTML en lugar de XML válido: {response.data.decode('utf-8')}")
+                _logger.error("El servicio devolvió una página HTML en lugar de XML válido.")
                 raise UserError("El servicio del SII devolvió una respuesta inesperada. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta y extraer la semilla
@@ -336,9 +340,12 @@ class InvoiceMail(models.Model):
                 headers=headers,
             )
 
-            # Validar la respuesta del token
+            # Registrar la respuesta del token
+            _logger.info(f"Respuesta obtenida del SII (token): {token_response.data.decode('utf-8')}")
+
+            # Verificar si la respuesta contiene HTML
             if b'<html' in token_response.data.lower():
-                _logger.error(f"El servicio devolvió HTML en lugar de XML válido al solicitar el token: {token_response.data.decode('utf-8')}")
+                _logger.error("El servicio devolvió una página HTML en lugar de XML válido al solicitar el token.")
                 raise UserError("El servicio del SII devolvió una respuesta inesperada al solicitar el token. Verifique la URL o el estado del servicio.")
 
             # Parsear la respuesta y extraer el token
@@ -352,8 +359,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener el token: {e}")
             raise UserError(f"Error al obtener el token del SII: {e}")
-
-
 
     def check_sii_status(self):
         """Consulta el estado del DTE en el SII."""
