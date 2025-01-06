@@ -319,18 +319,46 @@ class InvoiceMail(models.Model):
             raise UserError("Error al obtener el token desde el SII.")
 
     def _get_seed(self):
-        """Solicita la semilla desde el SII usando HTTPS."""
-        seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+        """Solicita la semilla desde el SII usando HTTPS y registra el proceso en el log."""
+        seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"  # URL del servicio para obtener la semilla
         http = urllib3.PoolManager()
         try:
+            _logger.info("Solicitando la semilla al SII.")
+            
+            # Realizar la solicitud al SII
             response = http.request('GET', seed_url)
+
+            # Registrar la respuesta completa en el log
+            _logger.info(f"Respuesta obtenida del SII (semilla): {response.data.decode('utf-8')}")
+
+            # Verificar si la respuesta contiene HTML
             if b'<html' in response.data.lower():
-                _logger.error("Respuesta HTML inesperada al solicitar la semilla.")
-                raise UserError("El servicio del SII devolvió una respuesta HTML en lugar de XML.")
+                _logger.error(f"El servicio del SII devolvió HTML en lugar de XML: {response.data.decode('utf-8')}")
+                self.message_post(
+                    body=f"<b>Error al obtener la semilla:</b><br/><pre>{response.data.decode('utf-8')}</pre>",
+                    subject="Error al Obtener la Semilla",
+                    message_type='comment',
+                    subtype_xmlid='mail.mt_note',
+                )
+                raise UserError("El servicio del SII devolvió HTML en lugar de un XML válido. Verifique la URL o el estado del servicio.")
+
+            # Parsear la respuesta XML y extraer la semilla
             root = etree.fromstring(response.data)
             seed = root.find('.//SEMILLA')
             if seed is None:
+                _logger.error("No se pudo encontrar la semilla en la respuesta del SII.")
                 raise UserError("No se pudo encontrar la semilla en la respuesta del SII.")
+
+            _logger.info(f"Semilla obtenida correctamente: {seed.text}")
+
+            # Registrar la semilla en el chatter
+            self.message_post(
+                body=f"<b>Semilla Obtenida:</b><br/><pre>{seed.text}</pre>",
+                subject="Semilla Obtenida",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
             return seed.text
         except Exception as e:
             _logger.error(f"Error al obtener la semilla desde el SII: {e}")
