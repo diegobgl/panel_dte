@@ -200,15 +200,12 @@ class InvoiceMail(models.Model):
             raise UserError("Solo se pueden rechazar DTEs en estado pendiente.")
         self.state = 'rejected'
 
-
-
     def _get_active_certificate(self):
         """Devuelve el certificado activo o lanza una excepción."""
         certificate = self.env['l10n_cl.certificate'].search([], limit=1)
         if not certificate:
             raise UserError("No se encontró un certificado digital activo en el sistema.")
         return certificate
-
 
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
         """Consultar estado del DTE en SII usando urllib3."""
@@ -294,7 +291,6 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error general al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
-
         
     def _get_token(self):
         """Genera un token válido desde el SII."""
@@ -329,9 +325,10 @@ class InvoiceMail(models.Model):
                 </item>
             </getToken>
             """
-
+            
             # Registrar el XML generado
             _logger.info(f"XML generado para solicitud de token:\n{signed_seed}")
+            self.post_xml_to_chatter(signed_seed, description="XML generado para solicitud de Token")
 
             # Solicitar el token al servicio del SII
             token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
@@ -395,7 +392,8 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-            
+            self.post_xml_to_chatter(soap_body, description="XML generado para consulta del estado del DTE")
+
             # Enviar la solicitud SOAP
             http = urllib3.PoolManager()
             headers = {'Content-Type': 'text/xml; charset=utf-8'}
@@ -435,6 +433,32 @@ class InvoiceMail(models.Model):
             _logger.error(f"El XML de respuesta no es válido: {e}")
             raise UserError("El XML recibido del SII no es válido. Verifique la respuesta del servicio.")
 
+    def post_xml_to_chatter(self, xml_content, description="XML generado para el SII"):
+        """
+        Registra el contenido de un XML en el Chatter de Odoo.
+
+        Args:
+            xml_content (str): El contenido del XML que deseas registrar.
+            description (str): Descripción que acompañará al XML en el Chatter.
+        """
+        try:
+            # Escapar caracteres especiales para mostrar el XML en formato legible en el chatter
+            escaped_xml = xml_content.replace('<', '&lt;').replace('>', '&gt;')
+
+            # Publicar el mensaje en el Chatter
+            self.message_post(
+                body=f"""
+                    <b>{description}</b><br/>
+                    <pre style="white-space: pre-wrap;">{escaped_xml}</pre>
+                """,
+                subject="XML Generado",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+            _logger.info("El XML ha sido registrado en el Chatter con éxito.")
+        except Exception as e:
+            _logger.error(f"Error al registrar el XML en el Chatter: {e}")
+            raise UserError(f"Error al registrar el XML en el Chatter: {e}")
 
 
 
