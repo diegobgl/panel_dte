@@ -297,65 +297,65 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error general al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
-def _get_token(self, signed_seed):
-    """Solicita el token al SII utilizando la semilla firmada."""
-    token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
-    http = urllib3.PoolManager()
+    def _get_token(self, signed_seed):
+        """Solicita el token al SII utilizando la semilla firmada."""
+        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+        http = urllib3.PoolManager()
 
-    try:
-        soap_request = f"""
-        <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-            <soapenv:Header/>
-            <soapenv:Body>
-                <getToken>
-                    <item>
-                        {signed_seed}
-                    </item>
-                </getToken>
-            </soapenv:Body>
-        </soapenv:Envelope>
-        """
+        try:
+            soap_request = f"""
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <getToken>
+                        <item>
+                            {signed_seed}
+                        </item>
+                    </getToken>
+                </soapenv:Body>
+            </soapenv:Envelope>
+            """
 
-        headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:GetTokenFromSeed'}
-        _logger.info(f"Solicitando el token con la semilla firmada:\n{soap_request}")
+            headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:GetTokenFromSeed'}
+            _logger.info(f"Solicitando el token con la semilla firmada:\n{soap_request}")
 
-        # Enviar la solicitud al SII
-        response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
+            # Enviar la solicitud al SII
+            response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
-        if response.status != 200:
-            raise Exception(f"Error HTTP al solicitar el token: {response.status}")
+            if response.status != 200:
+                raise Exception(f"Error HTTP al solicitar el token: {response.status}")
 
-        # Procesar la respuesta
-        response_data = response.data.decode('utf-8')
-        _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
-        root = etree.fromstring(response.data)
+            # Procesar la respuesta
+            response_data = response.data.decode('utf-8')
+            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
+            root = etree.fromstring(response.data)
 
-        # Extraer el nodo <getTokenReturn>
-        ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
-        get_token_return = root.find('.//soapenv:Body/getTokenResponse/getTokenReturn', namespaces=ns)
+            # Extraer el nodo <getTokenReturn>
+            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+            get_token_return = root.find('.//soapenv:Body/getTokenResponse/getTokenReturn', namespaces=ns)
 
-        if get_token_return is None:
-            raise Exception("No se pudo encontrar el nodo getTokenReturn en la respuesta del SII.")
+            if get_token_return is None:
+                raise Exception("No se pudo encontrar el nodo getTokenReturn en la respuesta del SII.")
 
-        # Decodificar el XML interno
-        decoded_response = html.unescape(get_token_return.text)
-        token_root = etree.fromstring(decoded_response.encode('utf-8'))
+            # Decodificar el XML interno
+            decoded_response = html.unescape(get_token_return.text)
+            token_root = etree.fromstring(decoded_response.encode('utf-8'))
 
-        # Extraer estado, glosa y token
-        estado = token_root.find('.//ESTADO').text
-        if estado != "00":
-            glosa = token_root.find('.//GLOSA').text or "Sin detalles."
-            raise Exception(f"Error al generar el token: {glosa}")
+            # Extraer estado, glosa y token
+            estado = token_root.find('.//ESTADO').text
+            if estado != "00":
+                glosa = token_root.find('.//GLOSA').text or "Sin detalles."
+                raise Exception(f"Error al generar el token: {glosa}")
 
-        token = token_root.find('.//TOKEN').text
-        if not token:
-            raise Exception("No se pudo encontrar el token en la respuesta del SII.")
+            token = token_root.find('.//TOKEN').text
+            if not token:
+                raise Exception("No se pudo encontrar el token en la respuesta del SII.")
 
-        return token
+            return token
 
-    except Exception as e:
-        _logger.error(f"Error al obtener el token desde el SII: {e}")
-        raise UserError(f"Error al obtener el token desde el SII: {e}")
+        except Exception as e:
+            _logger.error(f"Error al obtener el token desde el SII: {e}")
+            raise UserError(f"Error al obtener el token desde el SII: {e}")
 
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
