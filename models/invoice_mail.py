@@ -317,7 +317,7 @@ class InvoiceMail(models.Model):
             # Configurar las cabeceras
             headers = {
                 'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'urn:getToken'
+                'SOAPAction': 'urn:getToken'  # Acción SOAP requerida
             }
 
             # Enviar la solicitud al SII
