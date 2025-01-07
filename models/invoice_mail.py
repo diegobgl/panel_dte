@@ -13,6 +13,8 @@ from zeep import Client, Settings
 from zeep.transports import Transport
 from requests import Session
 import html
+import hashlib
+
 
 _logger = logging.getLogger(__name__)
 class InvoiceMail(models.Model):
@@ -401,12 +403,12 @@ class InvoiceMail(models.Model):
             x509_cert = p12.get_certificate()
 
             # Generar DigestValue (SHA1 de la semilla)
-            digest = crypto.digest('sha1', seed.encode('utf-8'))
+            digest = hashlib.sha1(seed.encode('utf-8')).digest()  # Usar hashlib para calcular el hash SHA1
             digest_value = base64.b64encode(digest).decode('utf-8')
 
-            # Generar SignatureValue firmando el Digest con la clave privada
+            # Generar SignedInfo XML
             signed_info = f"""
-            <SignedInfo>
+            <SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
                 <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
                 <Reference URI="">
@@ -418,24 +420,26 @@ class InvoiceMail(models.Model):
                 </Reference>
             </SignedInfo>
             """
-            canonical_signed_info = signed_info.encode('utf-8')  # Canonicalizar el XML
-            signature_value = crypto.sign(private_key, canonical_signed_info, 'sha1')
+
+            # Firmar SignedInfo con la clave privada
+            signed_info_canonicalized = signed_info.strip().encode('utf-8')
+            signature_value = crypto.sign(private_key, signed_info_canonicalized, 'sha1')
             signature_value_b64 = base64.b64encode(signature_value).decode('utf-8')
 
             # Extraer Modulus y Exponent de la clave pública
-            public_key = p12.get_certificate().get_pubkey()
+            public_key = x509_cert.get_pubkey()
             rsa_key = crypto.load_publickey(crypto.FILETYPE_PEM, crypto.dump_publickey(crypto.FILETYPE_PEM, public_key))
             modulus = base64.b64encode(rsa_key.to_cryptography_key().public_numbers().n.to_bytes(256, 'big')).decode('utf-8')
             exponent = base64.b64encode(rsa_key.to_cryptography_key().public_numbers().e.to_bytes(3, 'big')).decode('utf-8')
 
             # Generar el XML de la semilla firmada
             signed_seed = f"""
-            <getToken>
+            <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <item>
                     <Semilla>{seed}</Semilla>
                 </item>
-                <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-                    {signed_info}
+                <Signature>
+                    {signed_info.strip()}
                     <SignatureValue>{signature_value_b64}</SignatureValue>
                     <KeyInfo>
                         <KeyValue>
@@ -451,6 +455,7 @@ class InvoiceMail(models.Model):
                 </Signature>
             </getToken>
             """
+
             _logger.info("Semilla firmada correctamente.")
             return signed_seed.strip()
 
