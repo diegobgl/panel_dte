@@ -450,13 +450,20 @@ class InvoiceMail(models.Model):
 
     def _sign_seed(self, seed):
         """
-        Firma la semilla utilizando el certificado cargado.
+        Firma la semilla utilizando el certificado configurado en Odoo.
         :param seed: La semilla obtenida desde el SII.
         :return: La semilla firmada en formato XML.
         """
         try:
-            # Cargar el certificado y la clave privada desde la configuración de la compañía
-            p12 = crypto.load_pkcs12(base64.b64decode(self.company_id.cert_file), self.company_id.cert_password)
+            # Validar que el sistema tenga configurado el certificado y la contraseña
+            cert_file = self.env['ir.config_parameter'].sudo().get_param('dte.cert_file')
+            cert_password = self.env['ir.config_parameter'].sudo().get_param('dte.cert_password')
+
+            if not cert_file or not cert_password:
+                raise UserError("El certificado digital o la contraseña no están configurados en el sistema.")
+
+            # Cargar el certificado y la clave privada desde los parámetros de configuración
+            p12 = crypto.load_pkcs12(base64.b64decode(cert_file), cert_password)
             private_key = p12.get_privatekey()
             cert = p12.get_certificate()
 
