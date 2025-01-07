@@ -492,8 +492,7 @@ class InvoiceMail(models.Model):
             """
 
             # Firmar el bloque SignedInfo
-            signature = crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')
-            signature_value = base64.b64encode(signature).decode('utf-8')
+            signature_value = self._get_signature_value(private_key, signed_info)
 
             # Obtener el certificado en formato Base64
             cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
@@ -669,18 +668,16 @@ class InvoiceMail(models.Model):
 
     def _get_signature_value(self, private_key, signed_info):
         """
-        Calcula el valor de la firma para el XML firmado.
-        :param private_key: La clave privada usada para firmar.
-        :param signed_info: La información firmada en formato XML.
-        :return: El valor de la firma en Base64.
+        Firma el bloque SignedInfo usando la clave privada proporcionada.
+        :param private_key: Clave privada en formato OpenSSL.
+        :param signed_info: Bloque SignedInfo que se firmará.
+        :return: La firma en Base64.
         """
         try:
-            # Usar la clave privada para firmar los datos
             signature = crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')
-            # Retornar la firma en formato Base64
             return base64.b64encode(signature).decode('utf-8')
         except Exception as e:
-            raise UserError(f"Error al calcular la firma: {str(e)}")
+            raise UserError(f"Error al generar el SignatureValue: {str(e)}")
 
 class InvoiceMailLine(models.Model):
     _name = 'invoice.mail.line'
