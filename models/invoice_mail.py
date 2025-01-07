@@ -205,10 +205,13 @@ class InvoiceMail(models.Model):
 
     def _get_active_certificate(self):
         """Devuelve el certificado activo o lanza una excepción."""
-        certificate = self.env['l10n_cl.certificate'].search([], limit=1)
+        certificate = self.env['l10n_cl.certificate'].sudo().search([], limit=1)
         if not certificate:
             raise UserError("No se encontró un certificado digital activo en el sistema.")
+        if not certificate._is_valid_certificate():
+            raise UserError("El certificado configurado está expirado o no es válido.")
         return certificate
+
 
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
         """Consultar estado del DTE en SII usando urllib3."""
@@ -455,19 +458,13 @@ class InvoiceMail(models.Model):
         :return: La semilla firmada en formato XML.
         """
         try:
-            # Buscar un certificado válido
-            certificate = self.env['l10n_cl.certificate'].search([], limit=1)
-            if not certificate:
-                raise UserError("No se encontró ningún certificado configurado en el sistema.")
+            # Obtener el certificado activo con sudo()
+            certificate = self._get_active_certificate()
 
-            # Validar si el certificado es válido
-            if not certificate._is_valid_certificate():
-                raise UserError("El certificado configurado está expirado o no es válido.")
-
-            # Cargar el certificado y la clave privada desde el modelo l10n_cl.certificate
+            # Cargar el certificado y la clave privada
             p12 = crypto.load_pkcs12(
-                base64.b64decode(certificate.signature_key_file),
-                certificate.signature_pass_phrase.encode()
+                base64.b64decode(certificate.sudo().signature_key_file),
+                certificate.sudo().signature_pass_phrase.encode()
             )
             private_key = p12.get_privatekey()
             cert = p12.get_certificate()
