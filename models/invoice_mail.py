@@ -349,12 +349,21 @@ class InvoiceMail(models.Model):
             if response.status != 200:
                 raise Exception(f"Error HTTP al solicitar la semilla: {response.status}")
 
-            # Registrar la respuesta en los logs
+            # Registrar la respuesta completa en los logs
             _logger.info(f"Respuesta obtenida del SII (semilla): {response.data.decode('utf-8')}")
 
-            # Parsear la respuesta para extraer la semilla
+            # Parsear la respuesta SOAP para obtener el nodo <getSeedReturn>
             root = etree.fromstring(response.data)
-            seed = root.find('.//SEMILLA')
+            get_seed_return = root.find('.//{http://schemas.xmlsoap.org/soap/envelope/}Body/{http://schemas.xmlsoap.org/soap/envelope/}getSeedResponse/{http://schemas.xmlsoap.org/soap/envelope/}getSeedReturn')
+            if get_seed_return is None:
+                raise Exception("No se pudo encontrar el nodo getSeedReturn en la respuesta del SII.")
+
+            # Decodificar el contenido de <getSeedReturn>
+            decoded_seed_xml = html.unescape(get_seed_return.text)
+
+            # Parsear el XML decodificado para extraer la semilla
+            seed_root = etree.fromstring(decoded_seed_xml)
+            seed = seed_root.find('.//{http://www.sii.cl/XMLSchema}SEMILLA')
             if seed is None:
                 raise Exception("No se pudo encontrar la semilla en la respuesta del SII.")
 
