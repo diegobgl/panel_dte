@@ -292,34 +292,83 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error general al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
-        
     def _get_token(self, signed_seed):
         """Envía la semilla firmada al SII para obtener el token usando HTTPS."""
-        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"  # Endpoint del SII
         http = urllib3.PoolManager()
+
         try:
-            headers = {'Content-Type': 'application/xml'}
-            body = f"""
-            <getToken>
-                <item>
-                    <Semilla>{signed_seed}</Semilla>
-                </item>
-            </getToken>
+            _logger.info("Solicitando el token al SII con la semilla firmada.")
+
+            # Cuerpo de la solicitud SOAP
+            soap_request = f"""
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <getToken>
+                        <item>
+                            <Semilla>{signed_seed}</Semilla>
+                        </item>
+                    </getToken>
+                </soapenv:Body>
+            </soapenv:Envelope>
             """
-            response = http.request('POST', token_url, body=body.encode('utf-8'), headers=headers)
-            if b'<html' in response.data.lower():
-                _logger.error("Respuesta HTML inesperada al solicitar el token.")
-                raise UserError("El servicio del SII devolvió una respuesta HTML en lugar de XML.")
+
+            # Configurar las cabeceras
+            headers = {
+                'Content-Type': 'text/xml; charset=utf-8',
+                'SOAPAction': 'urn:getToken'
+            }
+
+            # Enviar la solicitud al SII
+            response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
+
+            # Validar la respuesta HTTP
+            if response.status != 200:
+                raise Exception(f"Error HTTP al solicitar el token: {response.status}")
+
+            # Registrar la respuesta completa en los logs
+            response_data = response.data.decode('utf-8')
+            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
+            self.message_post(
+                body=f"<b>Respuesta Completa del SII (Token):</b><br/><pre>{response_data}</pre>",
+                subject="Respuesta del SII - Solicitud de Token",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
+            # Parsear la respuesta SOAP para obtener el nodo <TOKEN>
             root = etree.fromstring(response.data)
-            token = root.find('.//TOKEN')
-            if token is None:
-                raise UserError("No se pudo encontrar el token en la respuesta del SII.")
-            return token.text
+            ns = {
+                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
+            }
+            token_node = root.find('.//soapenv:Body/soapenv:getTokenResponse/soapenv:TOKEN', namespaces=ns)
+
+            if token_node is None:
+                # Si no encuentra el nodo, registrar la estructura XML para depuración
+                _logger.error("Estructura del XML de Respuesta (Token): %s", etree.tostring(root, pretty_print=True).decode('utf-8'))
+                raise Exception("No se pudo encontrar el nodo <TOKEN> en la respuesta del SII.")
+
+            # Extraer el token del nodo <TOKEN>
+            token = token_node.text
+            _logger.info(f"Token obtenido correctamente: {token}")
+            self.message_post(
+                body=f"<b>Token Obtenido:</b> {token}",
+                subject="Token Obtenido del SII",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+            return token
+
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
+            self.message_post(
+                body=f"<b>Error al Obtener el Token:</b><br/><pre>{str(e)}</pre>",
+                subject="Error al Obtener el Token",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
             raise UserError("Error al obtener el token desde el SII.")
-
-
 
     def _get_seed(self):
         """Solicita la semilla desde el SII usando el método getSeed del servicio CrSeed."""
@@ -385,17 +434,61 @@ class InvoiceMail(models.Model):
 
     def _sign_seed(self, seed):
         """Firma la semilla utilizando el certificado digital configurado."""
-        certificate = self._get_active_certificate()
+        certificate = self._get_active_certificate()  # Obtiene el certificado configurado en Odoo
         try:
+            _logger.info("Firmando la semilla con el certificado configurado en Odoo.")
+
+            # Cargar el certificado y la clave privada desde los datos base64 del certificado
             p12 = crypto.load_pkcs12(
                 base64.b64decode(certificate.signature_key_file),
                 certificate.signature_pass_phrase.encode('utf-8')
             )
             private_key = p12.get_privatekey()
-            signed_seed = crypto.sign(private_key, seed.encode('utf-8'), 'sha1')
+            public_certificate = p12.get_certificate()
+
+            # Crear el XML de la semilla
+            seed_xml = f"""<?xml version="1.0" encoding="ISO-8859-1"?>
+            <getToken>
+                <item>
+                    <Semilla>{seed}</Semilla>
+                </item>
+            </getToken>"""
+
+            # Firmar la semilla utilizando la clave privada
+            signed_info = crypto.sign(private_key, seed_xml.encode('utf-8'), 'sha1')
+
+            # Generar el XML firmado completo
+            signed_seed = f"""
+            <getToken>
+                <item>
+                    <Semilla>{seed}</Semilla>
+                    <Signature>
+                        <SignedInfo>{signed_info.hex()}</SignedInfo>
+                        <X509Certificate>{base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, public_certificate)).decode('utf-8')}</X509Certificate>
+                    </Signature>
+                </item>
+            </getToken>
+            """
+
+            # Registrar la semilla firmada en los logs para depuración
+            _logger.info(f"Semilla firmada correctamente: {signed_seed}")
+            self.message_post(
+                body=f"<b>Semilla Firmada:</b><br/><pre>{signed_seed}</pre>",
+                subject="Semilla Firmada",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
             return signed_seed
+
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
+            self.message_post(
+                body=f"<b>Error al Firmar la Semilla:</b><br/><pre>{str(e)}</pre>",
+                subject="Error al Firmar la Semilla",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
             raise UserError("Error al firmar la semilla.")
 
 
