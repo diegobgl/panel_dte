@@ -295,12 +295,12 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
     def _get_token(self, signed_seed):
-        """Solicita el token desde el SII utilizando la semilla firmada."""
+        """Solicita el token al SII utilizando la semilla firmada."""
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         http = urllib3.PoolManager()
 
         try:
-            # Construir el cuerpo de la solicitud SOAP
+            # Formato XML correcto de la solicitud
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -308,20 +308,47 @@ class InvoiceMail(models.Model):
                     <getToken>
                         <item>
                             <Semilla>{signed_seed}</Semilla>
+                            <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+                                <SignedInfo>
+                                    <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+                                    <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+                                    <Reference URI="">
+                                        <Transforms>
+                                            <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                                        </Transforms>
+                                        <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+                                        <DigestValue>{self._get_digest_value(signed_seed)}</DigestValue>
+                                    </Reference>
+                                </SignedInfo>
+                                <SignatureValue>{self._get_signature_value()}</SignatureValue>
+                                <KeyInfo>
+                                    <KeyValue>
+                                        <RSAKeyValue>
+                                            <Modulus>{self._get_modulus()}</Modulus>
+                                            <Exponent>AQAB</Exponent>
+                                        </RSAKeyValue>
+                                    </KeyValue>
+                                    <X509Data>
+                                        <X509Certificate>{self._get_certificate()}</X509Certificate>
+                                    </X509Data>
+                                </KeyInfo>
+                            </Signature>
                         </item>
                     </getToken>
                 </soapenv:Body>
             </soapenv:Envelope>
             """
+
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:GetTokenFromSeed'}
             _logger.info(f"Solicitando el token con la semilla firmada:\n{soap_request}")
 
+            # Enviar la solicitud al SII
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
             if response.status != 200:
                 raise Exception(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Decodificar la respuesta SOAP
+            # Procesar la respuesta
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
             root = etree.fromstring(response.data)
