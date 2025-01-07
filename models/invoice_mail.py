@@ -300,33 +300,83 @@ class InvoiceMail(models.Model):
         http = urllib3.PoolManager()
 
         try:
-            _logger.info("Solicitando el token al SII con la semilla firmada.")
+            # Construir el cuerpo del XML
+            body = f"""
+            <getToken>
+                <item>
+                    <Semilla>{signed_seed}</Semilla>
+                </item>
+            </getToken>
+            """
 
+            # Configurar las cabeceras
             headers = {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'urn:getToken'
+                'Content-Type': 'application/xml',
+                'SOAPAction': 'urn:GetTokenFromSeed'  # Acción SOAP para solicitar el token
             }
-            response = http.request('POST', token_url, body=signed_seed.encode('utf-8'), headers=headers)
 
+            # Log de la solicitud
+            _logger.info(f"Solicitando el token al SII con el siguiente XML:\n{body}")
+            self.message_post(
+                body=f"Solicitando el token al SII. XML Enviado:<br/><pre>{body}</pre>",
+                subject="Solicitud de Token al SII",
+                message_type='notification',
+            )
+
+            # Enviar la solicitud al SII
+            response = http.request('POST', token_url, body=body.encode('utf-8'), headers=headers)
+
+            # Verificar la respuesta HTTP
             if response.status != 200:
-                _logger.error(f"Error HTTP al solicitar el token: {response.status}")
-                raise UserError(f"Error HTTP al solicitar el token: {response.status}")
+                error_message = f"Error HTTP al solicitar el token: {response.status}"
+                _logger.error(error_message)
+                self.message_post(
+                    body=f"Error HTTP al solicitar el token: {response.status}.",
+                    subject="Error en Solicitud de Token",
+                    message_type='notification',
+                )
+                raise UserError(error_message)
 
+            # Registrar la respuesta completa en los logs y en el chatter
             response_data = response.data.decode('utf-8')
-            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
+            _logger.info(f"Respuesta del SII al solicitar el token:\n{response_data}")
+            self.message_post(
+                body=f"Respuesta del SII al solicitar el token:<br/><pre>{response_data}</pre>",
+                subject="Respuesta de Token del SII",
+                message_type='notification',
+            )
 
-            root = etree.fromstring(response_data)
-            token_node = root.find('.//TOKEN')
-            if token_node is None:
-                raise UserError("No se pudo encontrar el token en la respuesta del SII.")
+            # Parsear el XML de respuesta para obtener el token
+            root = etree.fromstring(response.data)
+            token = root.find('.//TOKEN')
 
-            token = token_node.text
-            _logger.info(f"Token obtenido correctamente: {token}")
-            return token
+            if token is None:
+                error_message = "No se pudo encontrar el token en la respuesta del SII."
+                _logger.error(error_message)
+                self.message_post(
+                    body="No se pudo encontrar el token en la respuesta del SII.",
+                    subject="Error en Solicitud de Token",
+                    message_type='notification',
+                )
+                raise UserError(error_message)
+
+            # Registrar el token obtenido en el chatter
+            self.message_post(
+                body=f"Token obtenido correctamente: {token.text}",
+                subject="Token Obtenido",
+                message_type='notification',
+            )
+
+            return token.text
 
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
-            raise UserError("Error al obtener el token desde el SII.")
+            self.message_post(
+                body=f"Error al obtener el token desde el SII: {e}",
+                subject="Error en Solicitud de Token",
+                message_type='notification',
+            )
+            raise UserError(f"Error al obtener el token desde el SII: {e}")
 
     def _get_seed(self):
         """Solicita la semilla desde el SII usando el método getSeed del servicio CrSeed."""
