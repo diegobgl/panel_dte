@@ -295,106 +295,93 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
     def _get_token(self, signed_seed):
-        """Solicita el token al SII utilizando la semilla firmada."""
-        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
-        http = urllib3.PoolManager()
+            """Solicita el token al SII utilizando la semilla firmada."""
+            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+            http = urllib3.PoolManager()
 
-        try:
-            # Calcular el DigestValue
-            digest_value = self._get_digest_value(signed_seed)
+            try:
+                # Calcular el DigestValue
+                digest_value = self._get_digest_value(signed_seed)
 
-            # Formato XML correcto de la solicitud
-            soap_request = f"""
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-                <soapenv:Header/>
-                <soapenv:Body>
-                    <getToken>
-                        <item>
-                            <Semilla>{signed_seed}</Semilla>
-                            <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-                                <SignedInfo>
-                                    <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
-                                    <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
-                                    <Reference URI="">
-                                        <Transforms>
-                                            <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
-                                        </Transforms>
-                                        <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
-                                        <DigestValue>{digest_value}</DigestValue>
-                                    </Reference>
-                                </SignedInfo>
-                                <SignatureValue>{self._get_signature_value()}</SignatureValue>
-                                <KeyInfo>
-                                    <KeyValue>
-                                        <RSAKeyValue>
-                                            <Modulus>{self._get_modulus()}</Modulus>
-                                            <Exponent>AQAB</Exponent>
-                                        </RSAKeyValue>
-                                    </KeyValue>
-                                    <X509Data>
-                                        <X509Certificate>{self._get_certificate()}</X509Certificate>
-                                    </X509Data>
-                                </KeyInfo>
-                            </Signature>
-                        </item>
-                    </getToken>
-                </soapenv:Body>
-            </soapenv:Envelope>
-            """
+                # Formato XML correcto de la solicitud
+                soap_request = f"""
+                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                    <soapenv:Header/>
+                    <soapenv:Body>
+                        <getToken>
+                            <item>
+                                <Semilla>{signed_seed}</Semilla>
+                                <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+                                    <SignedInfo>
+                                        <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+                                        <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+                                        <Reference URI="">
+                                            <Transforms>
+                                                <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                                            </Transforms>
+                                            <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+                                            <DigestValue>{digest_value}</DigestValue>
+                                        </Reference>
+                                    </SignedInfo>
+                                    <SignatureValue>{self._get_signature_value()}</SignatureValue>
+                                    <KeyInfo>
+                                        <KeyValue>
+                                            <RSAKeyValue>
+                                                <Modulus>{self._get_modulus()}</Modulus>
+                                                <Exponent>AQAB</Exponent>
+                                            </RSAKeyValue>
+                                        </KeyValue>
+                                        <X509Data>
+                                            <X509Certificate>{self._get_certificate()}</X509Certificate>
+                                        </X509Data>
+                                    </KeyInfo>
+                                </Signature>
+                            </item>
+                        </getToken>
+                    </soapenv:Body>
+                </soapenv:Envelope>
+                """
 
-            headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:GetTokenFromSeed'}
-            _logger.info(f"Solicitando el token con la semilla firmada:\n{soap_request}")
+                headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:GetTokenFromSeed'}
+                _logger.info(f"Solicitando el token con la semilla firmada:\n{soap_request}")
 
-            # Enviar la solicitud al SII
-            response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
+                # Enviar la solicitud al SII
+                response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
-            if response.status != 200:
-                raise Exception(f"Error HTTP al solicitar el token: {response.status}")
+                if response.status != 200:
+                    raise Exception(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Procesar la respuesta
-            response_data = response.data.decode('utf-8')
-            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
-            root = etree.fromstring(response.data)
+                # Procesar la respuesta
+                response_data = response.data.decode('utf-8')
+                _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
+                root = etree.fromstring(response.data)
 
-            # Extraer el nodo <getTokenReturn>
-            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
-            get_token_return = root.find('.//soapenv:Body/getTokenResponse/getTokenReturn', namespaces=ns)
+                # Extraer el nodo <getTokenReturn>
+                ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+                get_token_return = root.find('.//soapenv:Body/getTokenResponse/getTokenReturn', namespaces=ns)
 
-            if get_token_return is None:
-                raise Exception("No se pudo encontrar el nodo getTokenReturn en la respuesta del SII.")
+                if get_token_return is None:
+                    raise Exception("No se pudo encontrar el nodo getTokenReturn en la respuesta del SII.")
 
-            # Decodificar el XML interno
-            decoded_response = html.unescape(get_token_return.text)
-            token_root = etree.fromstring(decoded_response.encode('utf-8'))
+                # Decodificar el XML interno
+                decoded_response = html.unescape(get_token_return.text)
+                token_root = etree.fromstring(decoded_response.encode('utf-8'))
 
-            # Extraer estado, glosa y token
-            estado = token_root.find('.//ESTADO').text
-            if estado != "00":
-                glosa = token_root.find('.//GLOSA').text or "Sin detalles."
-                raise Exception(f"Error al generar el token: {glosa}")
+                # Extraer estado, glosa y token
+                estado = token_root.find('.//ESTADO').text
+                if estado != "00":
+                    glosa = token_root.find('.//GLOSA').text or "Sin detalles."
+                    raise Exception(f"Error al generar el token: {glosa}")
 
-            token = token_root.find('.//TOKEN').text
-            if not token:
-                raise Exception("No se pudo encontrar el token en la respuesta del SII.")
+                token = token_root.find('.//TOKEN').text
+                if not token:
+                    raise Exception("No se pudo encontrar el token en la respuesta del SII.")
 
-            # Registrar en el chatter
-            self.message_post(
-                body=f"Token obtenido correctamente: {token}",
-                subject="Token Obtenido",
-                message_type='notification',
-            )
+                return token
 
-            return token
-
-        except Exception as e:
-            _logger.error(f"Error al obtener el token desde el SII: {e}")
-            self.message_post(
-                body=f"Error al obtener el token desde el SII: {e}",
-                subject="Error al Obtener Token",
-                message_type='notification',
-            )
-            raise UserError(f"Error al obtener el token desde el SII: {e}")
-
+            except Exception as e:
+                _logger.error(f"Error al obtener el token desde el SII: {e}")
+                raise UserError(f"Error al obtener el token desde el SII: {e}")
 
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
