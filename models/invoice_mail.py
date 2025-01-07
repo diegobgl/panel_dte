@@ -449,22 +449,22 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
     def _sign_seed(self, seed):
-        """Firma la semilla utilizando el certificado digital configurado en Odoo."""
-        certificate = self._get_active_certificate()
+        """
+        Firma la semilla utilizando el certificado cargado.
+        :param seed: La semilla obtenida desde el SII.
+        :return: La semilla firmada en formato XML.
+        """
         try:
-            # Cargar el certificado y clave privada desde el archivo PKCS#12
-            p12 = crypto.load_pkcs12(
-                base64.b64decode(certificate.signature_key_file),
-                certificate.signature_pass_phrase.encode('utf-8')
-            )
+            # Cargar el certificado y la clave privada desde la configuración de la compañía
+            p12 = crypto.load_pkcs12(base64.b64decode(self.company_id.cert_file), self.company_id.cert_password)
             private_key = p12.get_privatekey()
-            x509_cert = p12.get_certificate()
+            cert = p12.get_certificate()
 
-            # Generar DigestValue (SHA1 de la semilla)
-            digest = hashlib.sha1(seed.encode('utf-8')).digest()  # Usar hashlib para calcular el hash SHA1
+            # Generar el DigestValue de la semilla
+            digest = hashlib.sha1(seed.encode('utf-8')).digest()
             digest_value = base64.b64encode(digest).decode('utf-8')
 
-            # Generar SignedInfo XML
+            # Construir el bloque SignedInfo
             signed_info = f"""
             <SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
@@ -479,47 +479,36 @@ class InvoiceMail(models.Model):
             </SignedInfo>
             """
 
-            # Firmar SignedInfo con la clave privada
-            signed_info_canonicalized = signed_info.strip().encode('utf-8')
-            signature_value = crypto.sign(private_key, signed_info_canonicalized, 'sha1')
-            signature_value_b64 = base64.b64encode(signature_value).decode('utf-8')
+            # Firmar el bloque SignedInfo
+            signature = crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')
+            signature_value = base64.b64encode(signature).decode('utf-8')
 
-            # Extraer Modulus y Exponent de la clave pública
-            public_key = x509_cert.get_pubkey()
-            rsa_key = crypto.load_publickey(crypto.FILETYPE_PEM, crypto.dump_publickey(crypto.FILETYPE_PEM, public_key))
-            modulus = base64.b64encode(rsa_key.to_cryptography_key().public_numbers().n.to_bytes(256, 'big')).decode('utf-8')
-            exponent = base64.b64encode(rsa_key.to_cryptography_key().public_numbers().e.to_bytes(3, 'big')).decode('utf-8')
+            # Obtener el certificado en formato Base64
+            cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
+            cert_base64_clean = cert_base64.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "").replace("\n", "")
 
-            # Generar el XML de la semilla firmada
+            # Construir el nodo Signature
             signed_seed = f"""
             <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <item>
                     <Semilla>{seed}</Semilla>
                 </item>
                 <Signature>
-                    {signed_info.strip()}
-                    <SignatureValue>{signature_value_b64}</SignatureValue>
+                    {signed_info}
+                    <SignatureValue>{signature_value}</SignatureValue>
                     <KeyInfo>
-                        <KeyValue>
-                            <RSAKeyValue>
-                                <Modulus>{modulus}</Modulus>
-                                <Exponent>{exponent}</Exponent>
-                            </RSAKeyValue>
-                        </KeyValue>
                         <X509Data>
-                            <X509Certificate>{base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, x509_cert)).decode('utf-8')}</X509Certificate>
+                            <X509Certificate>{cert_base64_clean}</X509Certificate>
                         </X509Data>
                     </KeyInfo>
                 </Signature>
             </getToken>
             """
-
-            _logger.info("Semilla firmada correctamente.")
-            return signed_seed.strip()
+            return signed_seed
 
         except Exception as e:
-            _logger.error(f"Error al firmar la semilla: {e}")
-            raise UserError("Error al firmar la semilla.")
+            raise UserError(f"Error al firmar la semilla: {str(e)}")
+
 
     def check_sii_status(self):
         """
@@ -666,6 +655,20 @@ class InvoiceMail(models.Model):
         # Convertir el resultado del hash a Base64
         return base64.b64encode(digest).decode('utf-8')
 
+    def _get_signature_value(self, private_key, signed_info):
+        """
+        Calcula el valor de la firma para el XML firmado.
+        :param private_key: La clave privada usada para firmar.
+        :param signed_info: La información firmada en formato XML.
+        :return: El valor de la firma en Base64.
+        """
+        try:
+            # Usar la clave privada para firmar los datos
+            signature = crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')
+            # Retornar la firma en formato Base64
+            return base64.b64encode(signature).decode('utf-8')
+        except Exception as e:
+            raise UserError(f"Error al calcular la firma: {str(e)}")
 
 class InvoiceMailLine(models.Model):
     _name = 'invoice.mail.line'
