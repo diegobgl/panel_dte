@@ -361,15 +361,19 @@ class InvoiceMail(models.Model):
                 subtype_xmlid='mail.mt_note',
             )
 
-            # Parsear la respuesta SOAP para obtener el nodo <ns1:getSeedReturn>
+            # Parsear la respuesta SOAP para obtener el nodo <getSeedReturn>
             root = etree.fromstring(response.data)
             ns = {
                 'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                'ns1': 'http://service.wsdl'
+                'ns1': 'http://service.wsdl',
+                'xsi': 'http://www.w3.org/2001/XMLSchema-instance',
+                'xsd': 'http://www.w3.org/2001/XMLSchema',
             }
+            # Accede al nodo getSeedReturn utilizando el espacio de nombres "ns1"
             get_seed_return = root.find('.//soapenv:Body/ns1:getSeedResponse/ns1:getSeedReturn', namespaces=ns)
 
             if get_seed_return is None:
+                # Si no encuentra el nodo, lanza un error
                 raise Exception("No se pudo encontrar el nodo ns1:getSeedReturn en la respuesta del SII.")
 
             # Decodificar el contenido de <ns1:getSeedReturn>
