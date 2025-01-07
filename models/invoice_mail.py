@@ -365,18 +365,18 @@ class InvoiceMail(models.Model):
             root = etree.fromstring(response.data)
             ns = {
                 'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                'ns1': 'http://service.wsdl',
                 'xsi': 'http://www.w3.org/2001/XMLSchema-instance',
                 'xsd': 'http://www.w3.org/2001/XMLSchema',
             }
-            # Accede al nodo getSeedReturn utilizando el espacio de nombres "ns1"
-            get_seed_return = root.find('.//soapenv:Body/ns1:getSeedResponse/ns1:getSeedReturn', namespaces=ns)
+            # Intentar buscar el nodo <getSeedReturn> directamente
+            get_seed_return = root.find('.//{http://schemas.xmlsoap.org/soap/envelope/}Body/{http://schemas.xmlsoap.org/soap/envelope/}getSeedResponse/{http://schemas.xmlsoap.org/soap/envelope/}getSeedReturn', namespaces=ns)
 
             if get_seed_return is None:
-                # Si no encuentra el nodo, lanza un error
-                raise Exception("No se pudo encontrar el nodo ns1:getSeedReturn en la respuesta del SII.")
+                # Si no encuentra el nodo, registrar la estructura XML para análisis
+                _logger.error("Estructura del XML de Respuesta: %s", etree.tostring(root, pretty_print=True).decode('utf-8'))
+                raise Exception("No se pudo encontrar el nodo getSeedReturn en la respuesta del SII.")
 
-            # Decodificar el contenido de <ns1:getSeedReturn>
+            # Decodificar el contenido de <getSeedReturn>
             decoded_seed_xml = html.unescape(get_seed_return.text)
 
             # Parsear el XML decodificado para extraer la semilla
