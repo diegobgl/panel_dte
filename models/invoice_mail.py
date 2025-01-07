@@ -300,19 +300,49 @@ class InvoiceMail(models.Model):
         http = urllib3.PoolManager()
 
         try:
-            # Construir el cuerpo del XML
+            # Construir el cuerpo del XML con la firma
             body = f"""
-            <getToken>
-                <item>
-                    <Semilla>{signed_seed}</Semilla>
-                </item>
-            </getToken>
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <getToken>
+                        <item>
+                            <Semilla>{signed_seed}</Semilla>
+                            <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+                                <SignedInfo>
+                                    <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+                                    <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+                                    <Reference URI="">
+                                        <Transforms>
+                                            <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                                        </Transforms>
+                                        <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+                                        <DigestValue>DigestValueAqui</DigestValue>
+                                    </Reference>
+                                </SignedInfo>
+                                <SignatureValue>FirmaGeneradaAqui</SignatureValue>
+                                <KeyInfo>
+                                    <KeyValue>
+                                        <RSAKeyValue>
+                                            <Modulus>ModulusAqui</Modulus>
+                                            <Exponent>AQAB</Exponent>
+                                        </RSAKeyValue>
+                                    </KeyValue>
+                                    <X509Data>
+                                        <X509Certificate>{self._get_certificate()}</X509Certificate>
+                                    </X509Data>
+                                </KeyInfo>
+                            </Signature>
+                        </item>
+                    </getToken>
+                </soapenv:Body>
+            </soapenv:Envelope>
             """
 
             # Configurar las cabeceras
             headers = {
-                'Content-Type': 'application/xml',
-                'SOAPAction': 'urn:GetTokenFromSeed'  # Acción SOAP para solicitar el token
+                'Content-Type': 'text/xml; charset=utf-8',
+                'SOAPAction': 'urn:GetTokenFromSeed'
             }
 
             # Log de la solicitud
