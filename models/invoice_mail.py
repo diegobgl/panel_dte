@@ -654,17 +654,17 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al registrar el XML en el Chatter: {e}")
 
     def _get_digest_value(self, data):
-        """Calcula el DigestValue (SHA-1 en formato Base64) para el XML firmado."""
-        # Convertir los datos a bytes si no lo están
+        """
+        Calcula el DigestValue (SHA-1 en formato Base64) para el XML firmado.
+        """
         if isinstance(data, str):
-            data = data.encode('utf-8')
-        
+            data = data.encode('utf-8')  # Asegurar que los datos estén en bytes
+
         # Calcular el hash SHA-1
         digest = hashlib.sha1(data).digest()
-        
+
         # Convertir el resultado del hash a Base64
         return base64.b64encode(digest).decode('utf-8')
-
 
 
 class InvoiceMailLine(models.Model):
