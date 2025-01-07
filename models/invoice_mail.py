@@ -12,6 +12,7 @@ from OpenSSL import crypto
 from zeep import Client, Settings
 from zeep.transports import Transport
 from requests import Session
+import html
 
 _logger = logging.getLogger(__name__)
 class InvoiceMail(models.Model):
@@ -365,11 +366,8 @@ class InvoiceMail(models.Model):
             root = etree.fromstring(response.data)
             ns = {
                 'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                'xsi': 'http://www.w3.org/2001/XMLSchema-instance',
-                'xsd': 'http://www.w3.org/2001/XMLSchema',
             }
-            # Intentar buscar el nodo <getSeedReturn> directamente
-            get_seed_return = root.find('.//{http://schemas.xmlsoap.org/soap/envelope/}Body/{http://schemas.xmlsoap.org/soap/envelope/}getSeedResponse/{http://schemas.xmlsoap.org/soap/envelope/}getSeedReturn', namespaces=ns)
+            get_seed_return = root.find('.//soapenv:Body/soapenv:getSeedResponse/soapenv:getSeedReturn', namespaces=ns)
 
             if get_seed_return is None:
                 # Si no encuentra el nodo, registrar la estructura XML para análisis
@@ -379,11 +377,14 @@ class InvoiceMail(models.Model):
             # Decodificar el contenido de <getSeedReturn>
             decoded_seed_xml = html.unescape(get_seed_return.text)
 
+            # Registrar el XML decodificado en los logs
+            _logger.info(f"XML Decodificado de getSeedReturn: {decoded_seed_xml}")
+
             # Parsear el XML decodificado para extraer la semilla
             seed_root = etree.fromstring(decoded_seed_xml)
             seed = seed_root.find('.//{http://www.sii.cl/XMLSchema}SEMILLA')
             if seed is None:
-                raise Exception("No se pudo encontrar la semilla en la respuesta del SII.")
+                raise Exception("No se pudo encontrar el nodo <SEMILLA> en el XML decodificado.")
 
             # Registrar la semilla obtenida
             _logger.info(f"Semilla obtenida correctamente: {seed.text}")
