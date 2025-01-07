@@ -334,7 +334,7 @@ class InvoiceMail(models.Model):
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
                 <soapenv:Body>
-                    <getSeed/>
+                    <getSeed/> 
                 </soapenv:Body>
             </soapenv:Envelope>
             """
@@ -342,7 +342,7 @@ class InvoiceMail(models.Model):
             # Configurar las cabeceras, incluyendo SOAPAction
             headers = {
                 'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'urn:getSeed'
+                'SOAPAction': 'urn:getSeed'  # Acción SOAP correcta
             }
 
             # Enviar la solicitud al SII
@@ -352,58 +352,35 @@ class InvoiceMail(models.Model):
             if response.status != 200:
                 raise Exception(f"Error HTTP al solicitar la semilla: {response.status}")
 
-            # Registrar la respuesta completa en los logs y en el chatter
+            # Registrar la respuesta completa en los logs
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta obtenida del SII (semilla): {response_data}")
-            self.message_post(
-                body=f"<b>Respuesta Completa del SII (Semilla):</b><br/><pre>{response_data}</pre>",
-                subject="Respuesta del SII - Solicitud de Semilla",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
-
+            
             # Parsear la respuesta SOAP para obtener el nodo <getSeedReturn>
             root = etree.fromstring(response.data)
             ns = {
                 'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
             }
-            get_seed_return = root.find('.//soapenv:Body/soapenv:getSeedResponse/soapenv:getSeedReturn', namespaces=ns)
+            get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
 
             if get_seed_return is None:
-                # Si no encuentra el nodo, registrar la estructura XML para análisis
-                _logger.error("Estructura del XML de Respuesta: %s", etree.tostring(root, pretty_print=True).decode('utf-8'))
                 raise Exception("No se pudo encontrar el nodo getSeedReturn en la respuesta del SII.")
 
             # Decodificar el contenido de <getSeedReturn>
+            import html
             decoded_seed_xml = html.unescape(get_seed_return.text)
 
-            # Registrar el XML decodificado en los logs
-            _logger.info(f"XML Decodificado de getSeedReturn: {decoded_seed_xml}")
-
             # Parsear el XML decodificado para extraer la semilla
-            seed_root = etree.fromstring(decoded_seed_xml)
-            seed = seed_root.find('.//{http://www.sii.cl/XMLSchema}SEMILLA')
+            seed_root = etree.fromstring(decoded_seed_xml.encode('utf-8'))  # Codificar en UTF-8
+            seed = seed_root.find('.//SEMILLA')
             if seed is None:
-                raise Exception("No se pudo encontrar el nodo <SEMILLA> en el XML decodificado.")
+                raise Exception("No se pudo encontrar la semilla en el XML decodificado.")
 
-            # Registrar la semilla obtenida
             _logger.info(f"Semilla obtenida correctamente: {seed.text}")
-            self.message_post(
-                body=f"<b>Semilla Obtenida:</b> {seed.text}",
-                subject="Semilla Obtenida del SII",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
             return seed.text
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla desde el SII: {e}")
-            self.message_post(
-                body=f"<b>Error al Obtener la Semilla:</b><br/><pre>{str(e)}</pre>",
-                subject="Error al Obtener la Semilla",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
             raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
     def _sign_seed(self, seed):
