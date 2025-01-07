@@ -300,6 +300,9 @@ class InvoiceMail(models.Model):
         http = urllib3.PoolManager()
 
         try:
+            # Calcular el DigestValue
+            digest_value = self._get_digest_value(signed_seed)
+
             # Formato XML correcto de la solicitud
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
@@ -317,7 +320,7 @@ class InvoiceMail(models.Model):
                                             <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
                                         </Transforms>
                                         <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
-                                        <DigestValue>{self._get_digest_value(signed_seed)}</DigestValue>
+                                        <DigestValue>{digest_value}</DigestValue>
                                     </Reference>
                                 </SignedInfo>
                                 <SignatureValue>{self._get_signature_value()}</SignatureValue>
@@ -391,6 +394,7 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
+
 
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
