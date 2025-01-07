@@ -318,6 +318,8 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al obtener el token desde el SII: {e}")
             raise UserError("Error al obtener el token desde el SII.")
 
+
+
     def _get_seed(self):
         """Solicita la semilla desde el SII usando el método getSeed del servicio CrSeed."""
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"  # URL del servicio SOAP
@@ -349,16 +351,28 @@ class InvoiceMail(models.Model):
             if response.status != 200:
                 raise Exception(f"Error HTTP al solicitar la semilla: {response.status}")
 
-            # Registrar la respuesta completa en los logs
-            _logger.info(f"Respuesta obtenida del SII (semilla): {response.data.decode('utf-8')}")
+            # Registrar la respuesta completa en los logs y en el chatter
+            response_data = response.data.decode('utf-8')
+            _logger.info(f"Respuesta obtenida del SII (semilla): {response_data}")
+            self.message_post(
+                body=f"<b>Respuesta Completa del SII (Semilla):</b><br/><pre>{response_data}</pre>",
+                subject="Respuesta del SII - Solicitud de Semilla",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
 
-            # Parsear la respuesta SOAP para obtener el nodo <getSeedReturn>
+            # Parsear la respuesta SOAP para obtener el nodo <ns1:getSeedReturn>
             root = etree.fromstring(response.data)
-            get_seed_return = root.find('.//{http://schemas.xmlsoap.org/soap/envelope/}Body/{http://schemas.xmlsoap.org/soap/envelope/}getSeedResponse/{http://schemas.xmlsoap.org/soap/envelope/}getSeedReturn')
-            if get_seed_return is None:
-                raise Exception("No se pudo encontrar el nodo getSeedReturn en la respuesta del SII.")
+            ns = {
+                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
+                'ns1': 'http://service.wsdl'
+            }
+            get_seed_return = root.find('.//soapenv:Body/ns1:getSeedResponse/ns1:getSeedReturn', namespaces=ns)
 
-            # Decodificar el contenido de <getSeedReturn>
+            if get_seed_return is None:
+                raise Exception("No se pudo encontrar el nodo ns1:getSeedReturn en la respuesta del SII.")
+
+            # Decodificar el contenido de <ns1:getSeedReturn>
             decoded_seed_xml = html.unescape(get_seed_return.text)
 
             # Parsear el XML decodificado para extraer la semilla
@@ -369,10 +383,22 @@ class InvoiceMail(models.Model):
 
             # Registrar la semilla obtenida
             _logger.info(f"Semilla obtenida correctamente: {seed.text}")
+            self.message_post(
+                body=f"<b>Semilla Obtenida:</b> {seed.text}",
+                subject="Semilla Obtenida del SII",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
             return seed.text
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla desde el SII: {e}")
+            self.message_post(
+                body=f"<b>Error al Obtener la Semilla:</b><br/><pre>{str(e)}</pre>",
+                subject="Error al Obtener la Semilla",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
             raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
     def _sign_seed(self, seed):
