@@ -294,80 +294,36 @@ class InvoiceMail(models.Model):
 
     def _get_token(self, signed_seed):
         """Envía la semilla firmada al SII para obtener el token usando HTTPS."""
-        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"  # Endpoint del SII
+        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         http = urllib3.PoolManager()
 
         try:
             _logger.info("Solicitando el token al SII con la semilla firmada.")
 
-            # Cuerpo de la solicitud SOAP
-            soap_request = f"""
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-                <soapenv:Header/>
-                <soapenv:Body>
-                    <getToken>
-                        <item>
-                            <Semilla>{signed_seed}</Semilla>
-                        </item>
-                    </getToken>
-                </soapenv:Body>
-            </soapenv:Envelope>
-            """
-
-            # Configurar las cabeceras
             headers = {
                 'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'urn:getToken'  # Acción SOAP requerida
+                'SOAPAction': 'urn:getToken'
             }
+            response = http.request('POST', token_url, body=signed_seed.encode('utf-8'), headers=headers)
 
-            # Enviar la solicitud al SII
-            response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
-
-            # Validar la respuesta HTTP
             if response.status != 200:
-                raise Exception(f"Error HTTP al solicitar el token: {response.status}")
+                _logger.error(f"Error HTTP al solicitar el token: {response.status}")
+                raise UserError(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Registrar la respuesta completa en los logs
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
-            self.message_post(
-                body=f"<b>Respuesta Completa del SII (Token):</b><br/><pre>{response_data}</pre>",
-                subject="Respuesta del SII - Solicitud de Token",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
 
-            # Parsear la respuesta SOAP para obtener el nodo <TOKEN>
-            root = etree.fromstring(response.data)
-            ns = {
-                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-            }
-            token_node = root.find('.//soapenv:Body/soapenv:getTokenResponse/soapenv:TOKEN', namespaces=ns)
-
+            root = etree.fromstring(response_data)
+            token_node = root.find('.//TOKEN')
             if token_node is None:
-                # Si no encuentra el nodo, registrar la estructura XML para depuración
-                _logger.error("Estructura del XML de Respuesta (Token): %s", etree.tostring(root, pretty_print=True).decode('utf-8'))
-                raise Exception("No se pudo encontrar el nodo <TOKEN> en la respuesta del SII.")
+                raise UserError("No se pudo encontrar el token en la respuesta del SII.")
 
-            # Extraer el token del nodo <TOKEN>
             token = token_node.text
             _logger.info(f"Token obtenido correctamente: {token}")
-            self.message_post(
-                body=f"<b>Token Obtenido:</b> {token}",
-                subject="Token Obtenido del SII",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
             return token
 
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
-            self.message_post(
-                body=f"<b>Error al Obtener el Token:</b><br/><pre>{str(e)}</pre>",
-                subject="Error al Obtener el Token",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
             raise UserError("Error al obtener el token desde el SII.")
 
     def _get_seed(self):
@@ -501,7 +457,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError("Error al firmar la semilla.")
-
 
     def check_sii_status(self):
         """
