@@ -312,15 +312,12 @@ class InvoiceMail(models.Model):
                 <soapenv:Body>
                     <getToken>
                         <item>
-                            {signed_seed}
+                            {html.escape(signed_seed)}
                         </item>
                     </getToken>
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-
-            # Registrar el XML enviado en los logs para depuración
-            _logger.info(f"XML Enviado para el Token:\n{soap_request}")
 
             # Configurar las cabeceras
             headers = {
@@ -364,7 +361,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
             raise UserError(f"Error al obtener el token desde el SII: {e}")
-        
+            
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
