@@ -298,7 +298,9 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
     def _get_token(self, signed_seed):
-        """Solicita el token al SII utilizando la semilla firmada."""
+        """
+        Solicita el token al SII utilizando la semilla firmada.
+        """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         http = urllib3.PoolManager()
 
@@ -312,17 +314,17 @@ class InvoiceMail(models.Model):
                 <soapenv:Body>
                     <getToken>
                         <item>
-                            {html.escape(signed_seed)}
+                            {signed_seed}
                         </item>
                     </getToken>
                 </soapenv:Body>
             </soapenv:Envelope>
             """
 
-            # Configurar las cabeceras
+            # Configurar las cabeceras, incluyendo SOAPAction
             headers = {
                 'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'urn:getToken'  # Acción SOAP correcta
+                'SOAPAction': 'urn:getToken'
             }
 
             # Enviar la solicitud al SII
@@ -332,15 +334,9 @@ class InvoiceMail(models.Model):
             if response.status != 200:
                 raise Exception(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Registrar la respuesta completa en los logs
-            response_data = response.data.decode('utf-8')
-            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
-
-            # Parsear la respuesta SOAP para obtener el nodo <getTokenReturn>
+            # Parsear la respuesta SOAP
             root = etree.fromstring(response.data)
-            ns = {
-                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-            }
+            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_token_return = root.find('.//soapenv:Body/getTokenResponse/getTokenReturn', namespaces=ns)
 
             if get_token_return is None:
@@ -348,9 +344,9 @@ class InvoiceMail(models.Model):
 
             # Decodificar el contenido de <getTokenReturn>
             decoded_token_xml = html.unescape(get_token_return.text)
-
-            # Parsear el XML decodificado para extraer el token
             token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
+
+            # Extraer el Token
             token = token_root.find('.//TOKEN')
             if token is None:
                 raise Exception("No se pudo encontrar el token en el XML decodificado.")
@@ -361,7 +357,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
             raise UserError(f"Error al obtener el token desde el SII: {e}")
-            
+                
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
