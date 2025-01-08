@@ -494,7 +494,6 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al firmar la semilla: {str(e)}")
 
 
-
     def check_sii_status(self):
         """
         Consulta el estado del DTE en el SII utilizando las funciones indicadas:
