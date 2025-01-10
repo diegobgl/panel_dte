@@ -9,11 +9,9 @@ import logging
 from lxml import etree  
 import time
 from OpenSSL import crypto
-from zeep import Client, Settings
-from zeep.transports import Transport
-from requests import Session
 import html
 import hashlib
+
 
 
 _logger = logging.getLogger(__name__)
@@ -306,8 +304,12 @@ class InvoiceMail(models.Model):
 
         try:
             _logger.info("Solicitando el token al SII.")
+            self.message_post(
+                body="Iniciando solicitud de token al SII.",
+                subject="Solicitud de Token",
+                message_type='notification',
+            )
 
-            # Construir el cuerpo de la solicitud SOAP
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -320,21 +322,20 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-
-            # Configurar las cabeceras, incluyendo SOAPAction
-            headers = {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'urn:getToken'
-            }
-
-            # Enviar la solicitud al SII
+            headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:getToken'}
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
-            # Validar la respuesta HTTP
             if response.status != 200:
                 raise Exception(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Parsear la respuesta SOAP
+            response_data = response.data.decode('utf-8')
+            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
+            self.message_post(
+                body=f"Respuesta obtenida del SII (token):<br/><pre>{response_data}</pre>",
+                subject="Respuesta de Token SII",
+                message_type='notification',
+            )
+
             root = etree.fromstring(response.data)
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_token_return = root.find('.//soapenv:Body/getTokenResponse/getTokenReturn', namespaces=ns)
@@ -342,20 +343,28 @@ class InvoiceMail(models.Model):
             if get_token_return is None:
                 raise Exception("No se pudo encontrar el nodo getTokenReturn en la respuesta del SII.")
 
-            # Decodificar el contenido de <getTokenReturn>
             decoded_token_xml = html.unescape(get_token_return.text)
             token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
 
-            # Extraer el Token
             token = token_root.find('.//TOKEN')
             if token is None:
                 raise Exception("No se pudo encontrar el token en el XML decodificado.")
 
             _logger.info(f"Token obtenido correctamente: {token.text}")
+            self.message_post(
+                body=f"Token obtenido correctamente: {token.text}",
+                subject="Token Obtenido",
+                message_type='notification',
+            )
             return token.text
 
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
+            self.message_post(
+                body=f"Error al obtener el token desde el SII: {e}",
+                subject="Error al Obtener Token",
+                message_type='notification',
+            )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
                 
     def _get_seed(self):
@@ -365,6 +374,12 @@ class InvoiceMail(models.Model):
 
         try:
             _logger.info("Solicitando la semilla al SII.")
+            self.message_post(
+                body="Iniciando solicitud de semilla al SII.",
+                subject="Solicitud de Semilla",
+                message_type='notification',
+            )
+
             soap_request = """
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -382,9 +397,13 @@ class InvoiceMail(models.Model):
             # Decodificar la respuesta SOAP
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta obtenida del SII (semilla): {response_data}")
-            root = etree.fromstring(response.data)
+            self.message_post(
+                body=f"Respuesta obtenida del SII (semilla):<br/><pre>{response_data}</pre>",
+                subject="Respuesta de Semilla SII",
+                message_type='notification',
+            )
 
-            # Extraer el nodo <getSeedReturn>
+            root = etree.fromstring(response.data)
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
 
@@ -395,7 +414,7 @@ class InvoiceMail(models.Model):
             decoded_response = html.unescape(get_seed_return.text)
             seed_root = etree.fromstring(decoded_response.encode('utf-8'))
 
-            # Extraer estado, glosa y semilla
+            # Extraer estado y semilla
             estado = seed_root.find('.//ESTADO').text
             if estado != "00":
                 glosa = seed_root.find('.//GLOSA').text or "Sin detalles."
@@ -405,7 +424,6 @@ class InvoiceMail(models.Model):
             if not semilla:
                 raise Exception("No se pudo encontrar la semilla en la respuesta del SII.")
 
-            # Registrar en el chatter
             self.message_post(
                 body=f"Semilla obtenida correctamente: {semilla}",
                 subject="Semilla Obtenida",
@@ -430,10 +448,8 @@ class InvoiceMail(models.Model):
         :return: La semilla firmada en formato XML.
         """
         try:
-            # Obtener el certificado activo
             certificate = self._get_active_certificate()
 
-            # Cargar el certificado y la clave privada
             p12 = crypto.load_pkcs12(
                 base64.b64decode(certificate.signature_key_file),
                 certificate.signature_pass_phrase.encode()
@@ -441,35 +457,27 @@ class InvoiceMail(models.Model):
             private_key = p12.get_privatekey()
             cert = p12.get_certificate()
 
-            # Generar el DigestValue de la semilla
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
             digest_value = base64.b64encode(digest).decode('utf-8')
 
-            # Construir el bloque SignedInfo
             signed_info = f"""
-            <SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
-                <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
-                <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+            <SignedInfo xmlns="http://www.w3.org/2009/xmldsig#">
+                <CanonicalizationMethod Algorithm="http://www.w3.org/2009/xmldsig#enveloped-signature"/>
+                <SignatureMethod Algorithm="http://www.w3.org/2009/xmldsig#rsa-sha1"/>
                 <Reference URI="">
-                    <Transforms>
-                        <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
-                    </Transforms>
-                    <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+                    <DigestMethod Algorithm="http://www.w3.org/2009/xmldsig#sha1"/>
                     <DigestValue>{digest_value}</DigestValue>
                 </Reference>
             </SignedInfo>
             """
 
-            # Firmar el bloque SignedInfo
             signature_value = base64.b64encode(crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')).decode('utf-8')
 
-            # Obtener el certificado en formato Base64
             cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
             cert_base64_clean = cert_base64.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "").replace("\n", "")
 
-            # Construir el nodo Signature
             signed_seed = f"""
-            <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
+            <getToken xmlns="http://www.w3.org/2009/xmldsig#">
                 <item>
                     <Semilla>{seed}</Semilla>
                 </item>
@@ -484,10 +492,21 @@ class InvoiceMail(models.Model):
                 </Signature>
             </getToken>
             """
+            self.message_post(
+                body=f"Semilla firmada correctamente:<br/><pre>{signed_seed}</pre>",
+                subject="Semilla Firmada",
+                message_type='notification',
+            )
             return signed_seed
 
         except Exception as e:
-            raise UserError(f"Error al firmar la semilla: {str(e)}")
+            _logger.error(f"Error al firmar la semilla: {e}")
+            self.message_post(
+                body=f"Error al firmar la semilla: {e}",
+                subject="Error al Firmar Semilla",
+                message_type='notification',
+            )
+            raise UserError(f"Error al firmar la semilla: {e}")
 
 
     def check_sii_status(self):
