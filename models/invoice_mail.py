@@ -52,7 +52,7 @@ class InvoiceMail(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
-    token_request_xml = fields.Text(string='XML Token Request', help="XML generado para la solicitud de token al SII")
+    token_request_xml = fields.Text(string="Token Request XML", track_visibility="onchange")
 
 
 
@@ -318,7 +318,7 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
             
-            # **Guardar el contenido del XML en el campo del modelo**
+            # Guardar el XML en el campo
             self.write({'token_request_xml': soap_request})
             _logger.info("XML de solicitud de token guardado en el modelo.")
 

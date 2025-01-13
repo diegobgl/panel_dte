@@ -81,7 +81,7 @@
                         </page>
                         <!-- Nueva Página para Ver el XML Generado -->
                         <page string="Token Request XML">
-                            <field name="token_request_xml" widget="html" readonly="1" nolabel="1"/>
+                             <field name="token_request_xml" nolabel="1" widget="text"/>
                         </page>
                     </notebook>
                 </sheet>
