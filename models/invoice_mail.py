@@ -52,6 +52,7 @@ class InvoiceMail(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
+    token_request_xml = fields.Text(string='XML Token Request', help="XML generado para la solicitud de token al SII")
 
 
 
@@ -297,7 +298,7 @@ class InvoiceMail(models.Model):
 
     def _get_token(self, signed_seed):
         """
-        Solicita el token al SII utilizando la semilla firmada.
+        Solicita el token al SII utilizando la semilla firmada y guarda el XML generado en un campo.
         """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         http = urllib3.PoolManager()
@@ -310,18 +311,23 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
 
+            # Generar el XML de la solicitud
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
                 <soapenv:Body>
                     <getToken>
-                        <item>
-                            {signed_seed}
-                        </item>
+                        <item><![CDATA[{signed_seed}]]></item>
                     </getToken>
                 </soapenv:Body>
             </soapenv:Envelope>
             """
+
+            # Guardar el XML en el campo del modelo
+            self.token_request_xml = soap_request
+            _logger.info("XML de solicitud de token guardado en el modelo.")
+
+            # Configurar encabezados y enviar la solicitud
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:getToken'}
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
@@ -366,6 +372,7 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
+
                 
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
