@@ -298,7 +298,7 @@ class InvoiceMail(models.Model):
 
     def _get_token(self, signed_seed):
         """
-        Solicita el token al SII utilizando la semilla firmada y guarda el XML generado en un campo.
+        Solicita el token al SII utilizando la semilla firmada.
         """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         http = urllib3.PoolManager()
@@ -311,23 +311,24 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
 
-            # Generar el XML de la solicitud
+            # Generar el XML de solicitud
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
                 <soapenv:Body>
                     <getToken>
-                        <item><![CDATA[{signed_seed}]]></item>
+                        <item>
+                            {signed_seed}
+                        </item>
                     </getToken>
                 </soapenv:Body>
             </soapenv:Envelope>
             """
 
-            # Guardar el XML en el campo del modelo
-            self.token_request_xml = soap_request
+            # Guardar el XML en el campo antes de enviarlo
+            self.write({'token_request_xml': soap_request})
             _logger.info("XML de solicitud de token guardado en el modelo.")
 
-            # Configurar encabezados y enviar la solicitud
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:getToken'}
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
@@ -372,6 +373,7 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
+
 
                 
     def _get_seed(self):
