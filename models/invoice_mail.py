@@ -305,6 +305,8 @@ class InvoiceMail(models.Model):
 
         try:
             _logger.info("Solicitando el token al SII.")
+
+            # Generar el XML de solicitud
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -317,17 +319,19 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-            
-            # Guardar el XML en el campo
-            self.write({'token_request_xml': soap_request})
-            _logger.info("XML de solicitud de token guardado en el modelo.")
 
+            # Guardar el XML en el campo del modelo
+            self.write({'token_request_xml': soap_request})
+            _logger.info(f"XML de solicitud de token guardado en el modelo: {soap_request}")
+
+            # Configuración de headers y envío de solicitud
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:getToken'}
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
             if response.status != 200:
                 raise Exception(f"Error HTTP al solicitar el token: {response.status}")
 
+            # Procesar la respuesta
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
             self.message_post(
@@ -366,7 +370,6 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
-
 
                 
     def _get_seed(self):
