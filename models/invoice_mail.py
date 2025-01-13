@@ -305,13 +305,6 @@ class InvoiceMail(models.Model):
 
         try:
             _logger.info("Solicitando el token al SII.")
-            self.message_post(
-                body="Iniciando solicitud de token al SII.",
-                subject="Solicitud de Token",
-                message_type='notification',
-            )
-
-            # Generar el XML de solicitud
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -324,8 +317,8 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-
-            # Guardar el XML en el campo antes de enviarlo
+            
+            # **Guardar el contenido del XML en el campo del modelo**
             self.write({'token_request_xml': soap_request})
             _logger.info("XML de solicitud de token guardado en el modelo.")
 
