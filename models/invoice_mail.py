@@ -300,7 +300,7 @@ class InvoiceMail(models.Model):
         """
         Solicita el token al SII utilizando la semilla firmada.
         """
-        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws?WSDL"
         http = urllib3.PoolManager()
 
         try:
