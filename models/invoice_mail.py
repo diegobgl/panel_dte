@@ -371,6 +371,7 @@ class InvoiceMail(models.Model):
             )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
 
+
                 
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
