@@ -494,19 +494,25 @@ class InvoiceMail(models.Model):
             digest_value = base64.b64encode(digest).decode('utf-8')
 
             signed_info = f"""
-            <SignedInfo xmlns="http://www.w3.org/2009/xmldsig#">
-                <CanonicalizationMethod Algorithm="http://www.w3.org/2009/xmldsig#enveloped-signature"/>
-                <SignatureMethod Algorithm="http://www.w3.org/2009/xmldsig#rsa-sha1"/>
+            <SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+                <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+                <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
                 <Reference URI="">
-                    <DigestMethod Algorithm="http://www.w3.org/2009/xmldsig#sha1"/>
+                    <Transforms>
+                        <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                    </Transforms>
+                    <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
                     <DigestValue>{digest_value}</DigestValue>
                 </Reference>
             </SignedInfo>
             """
             signature_value = base64.b64encode(crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')).decode('utf-8')
 
+            modulus = base64.b64encode(crypto.dump_privatekey(crypto.FILETYPE_PEM, private_key)).decode('utf-8')
+            modulus_clean = modulus.replace("\n", "").strip()
+
             signed_seed = f"""
-            <getToken xmlns="http://www.w3.org/2009/xmldsig#">
+            <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <item>
                     <Semilla>{seed}</Semilla>
                 </item>
@@ -514,6 +520,12 @@ class InvoiceMail(models.Model):
                     {signed_info}
                     <SignatureValue>{signature_value}</SignatureValue>
                     <KeyInfo>
+                        <KeyValue>
+                            <RSAKeyValue>
+                                <Modulus>{modulus_clean}</Modulus>
+                                <Exponent>AQAB</Exponent>
+                            </RSAKeyValue>
+                        </KeyValue>
                         <X509Data>
                             <X509Certificate>{cert_base64_clean}</X509Certificate>
                         </X509Data>
