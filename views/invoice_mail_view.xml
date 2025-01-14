@@ -17,7 +17,19 @@
         </field>
     </record>
 
-    <!-- Form View -->
+        <!-- Action Button -->
+    <!--record id="action_fetch_emails" model="ir.actions.server">
+        <field name="name">Fetch Emails</field>
+        <field name="model_id" ref="model_invoice_mail"/>
+        <field name="binding_model_id" ref="model_invoice_mail"/>
+        <field name="state">code</field>
+        <field name="code">
+            action = env['invoice.mail'].fetch_emails()
+        </field>
+    </record-->
+
+
+
     <record id="view_invoice_mail_form" model="ir.ui.view">
         <field name="name">invoice.mail.form</field>
         <field name="model">invoice.mail</field>
@@ -79,10 +91,6 @@
                                 </tree>
                             </field>
                         </page>
-                        <!-- Nueva Página para Ver el XML Generado -->
-                        <page string="Token Request XML">
-                             <field name="token_request_xml" nolabel="1" widget="text"/>
-                        </page>
                     </notebook>
                 </sheet>
                 <div class="oe_chatter">
@@ -93,7 +101,11 @@
         </field>
     </record>
 
-    <!-- Action -->
+
+
+
+
+    <!-- Add Action to Action Bar -->
     <record id="action_invoice_mail_tree" model="ir.actions.act_window">
         <field name="name">Electronic Invoices</field>
         <field name="res_model">invoice.mail</field>
@@ -109,7 +121,8 @@
         <field name="binding_type">action</field>
     </record>
 
-    <!-- Menu -->
-    <menuitem id="menu_chilean_invoice_root" name="Electronic Invoices" sequence="1"/>
+        <!-- Menu and Action -->
+    <menuitem id="menu_chilean_invoice_root" name=" Electronic Invoices" sequence="1"/>
     <menuitem id="menu_chilean_invoice_panel" name="Invoice Panel" parent="menu_chilean_invoice_root" action="action_invoice_mail_tree" sequence="1"/>
+
 </odoo>
