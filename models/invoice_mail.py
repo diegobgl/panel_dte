@@ -472,6 +472,7 @@ class InvoiceMail(models.Model):
         try:
             certificate = self._get_active_certificate()
 
+            # Cargar el certificado y la clave privada
             p12 = crypto.load_pkcs12(
                 base64.b64decode(certificate.signature_key_file),
                 certificate.signature_pass_phrase.encode()
@@ -481,7 +482,12 @@ class InvoiceMail(models.Model):
 
             # Limpieza del certificado en formato Base64
             cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
-            cert_base64_clean = cert_base64.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "").replace("\n", "")
+            cert_base64_clean = (
+                cert_base64.replace("-----BEGIN CERTIFICATE-----", "")
+                .replace("-----END CERTIFICATE-----", "")
+                .replace("\n", "")
+                .strip()  # Asegurarse de eliminar espacios adicionales
+            )
 
             # Crear los elementos de la firma
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
