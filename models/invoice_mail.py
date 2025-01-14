@@ -481,7 +481,7 @@ class InvoiceMail(models.Model):
 
             # Limpieza del certificado en formato Base64
             cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
-            cert_base64_clean = cert_base64.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----").replace("\n", "")
+            cert_base64_clean = cert_base64.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "").replace("\n", "")
 
             # Crear los elementos de la firma
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
