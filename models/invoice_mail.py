@@ -310,52 +310,61 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
 
-            # Crear la solicitud SOAP con el formato correcto
+            # Construcción del XML de solicitud
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
                 <soapenv:Body>
-                    <getToken xmlns="https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws">
-                        <pszXml><![CDATA[{signed_seed}]]></pszXml>
+                    <getToken>
+                        <item>
+                            {signed_seed}
+                        </item>
                     </getToken>
                 </soapenv:Body>
             </soapenv:Envelope>
             """
+            
+            # Registrar el XML en el Chatter y en el log
+            _logger.info(f"XML enviado al solicitar el token:\n{soap_request}")
+            self.message_post(
+                body=f"<b>XML enviado al solicitar el token:</b><br/><pre>{soap_request}</pre>",
+                subject="Solicitud de Token - XML Enviado",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
 
-            headers = {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'urn:getToken'
-            }
-
-            # Enviar la solicitud al servicio del SII
+            # Enviar la solicitud
+            headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:getToken'}
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
-            # Validar el código HTTP de la respuesta
+            # Validar la respuesta HTTP
             if response.status != 200:
-                _logger.error(f"Error HTTP al solicitar el token: {response.status}")
-                raise UserError(f"Error HTTP al solicitar el token: {response.status}")
+                raise Exception(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Log del XML de respuesta
-            _logger.info(f"Respuesta obtenida del SII (token): {response.data.decode('utf-8')}")
+            response_data = response.data.decode('utf-8')
+            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
+            self.message_post(
+                body=f"Respuesta obtenida del SII (token):<br/><pre>{response_data}</pre>",
+                subject="Respuesta de Token SII",
+                message_type='notification',
+            )
 
-            # Parsear el XML de respuesta
-            response_xml = etree.fromstring(response.data)
+            # Parsear la respuesta y extraer el token
+            root = etree.fromstring(response.data)
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
-            get_token_return = response_xml.find('.//soapenv:Body//getTokenResponse//getTokenReturn', namespaces=ns)
+            get_token_return = root.find('.//soapenv:Body/ns1:getTokenResponse/ns1:getTokenReturn', namespaces=ns)
 
             if get_token_return is None:
-                raise UserError("No se encontró el nodo getTokenReturn en la respuesta del SII.")
+                raise Exception("No se pudo encontrar el nodo getTokenReturn en la respuesta del SII.")
 
-            # Decodificar el XML interno del token
             decoded_token_xml = html.unescape(get_token_return.text)
             token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
 
-            # Extraer el token
             token = token_root.find('.//TOKEN')
             if token is None:
-                raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
+                raise Exception("No se pudo encontrar el token en el XML decodificado.")
 
-            _logger.info(f"Token obtenido: {token.text}")
+            _logger.info(f"Token obtenido correctamente: {token.text}")
             self.message_post(
                 body=f"Token obtenido correctamente: {token.text}",
                 subject="Token Obtenido",
