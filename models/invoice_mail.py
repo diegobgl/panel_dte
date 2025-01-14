@@ -468,8 +468,6 @@ class InvoiceMail(models.Model):
     def _sign_seed(self, seed):
         """
         Firma la semilla utilizando el certificado configurado en el modelo l10n_cl.certificate.
-        :param seed: La semilla obtenida desde el SII.
-        :return: La semilla firmada en formato XML.
         """
         try:
             certificate = self._get_active_certificate()
@@ -481,6 +479,11 @@ class InvoiceMail(models.Model):
             private_key = p12.get_privatekey()
             cert = p12.get_certificate()
 
+            # Limpieza del certificado en formato Base64
+            cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
+            cert_base64_clean = cert_base64.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----").replace("\n", "")
+
+            # Crear los elementos de la firma
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
             digest_value = base64.b64encode(digest).decode('utf-8')
 
@@ -494,11 +497,7 @@ class InvoiceMail(models.Model):
                 </Reference>
             </SignedInfo>
             """
-
             signature_value = base64.b64encode(crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')).decode('utf-8')
-
-            cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
-            cert_base64_clean = cert_base64.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "").replace("\n", "")
 
             signed_seed = f"""
             <getToken xmlns="http://www.w3.org/2009/xmldsig#">
@@ -516,20 +515,10 @@ class InvoiceMail(models.Model):
                 </Signature>
             </getToken>
             """
-            self.message_post(
-                body=f"Semilla firmada correctamente:<br/><pre>{signed_seed}</pre>",
-                subject="Semilla Firmada",
-                message_type='notification',
-            )
             return signed_seed
 
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
-            self.message_post(
-                body=f"Error al firmar la semilla: {e}",
-                subject="Error al Firmar Semilla",
-                message_type='notification',
-            )
             raise UserError(f"Error al firmar la semilla: {e}")
 
 
