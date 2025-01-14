@@ -310,59 +310,69 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
 
-            # Construcción del XML de solicitud
+            # Crear la solicitud SOAP con el formato correcto
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
                 <soapenv:Body>
-                    <getToken>
-                        <item>
-                            {signed_seed}
-                        </item>
+                    <getToken xmlns="https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws">
+                        <pszXml><![CDATA[{signed_seed}]]></pszXml>
                     </getToken>
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-            
-            # Registrar el XML en el Chatter y en el log
+
+            headers = {
+                'Content-Type': 'text/xml; charset=utf-8',
+                'SOAPAction': 'urn:getToken'
+            }
+
+            # Log del XML enviado
             _logger.info(f"XML enviado al solicitar el token:\n{soap_request}")
-            self.message_post(
-                body=f"<b>XML enviado al solicitar el token:</b><br/><pre>{soap_request}</pre>",
-                subject="Solicitud de Token - XML Enviado",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
 
-            # Enviar la solicitud
-            headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'urn:getToken'}
-            response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
+            # Enviar la solicitud al servicio del SII
+            response = None
+            for attempt in range(3):  # Reintentar hasta 3 veces en caso de fallo
+                try:
+                    response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
+                    if response.status == 200:
+                        break
+                    _logger.warning(f"Intento {attempt + 1}: Error HTTP al solicitar el token, código: {response.status}")
+                except Exception as e:
+                    _logger.warning(f"Intento {attempt + 1}: Error al enviar la solicitud al SII: {e}")
+                    if attempt == 2:  # Si es el último intento, lanza la excepción
+                        raise UserError("No se pudo obtener el token tras múltiples intentos.")
 
-            # Validar la respuesta HTTP
+            # Validar el código HTTP de la respuesta
             if response.status != 200:
-                raise Exception(f"Error HTTP al solicitar el token: {response.status}")
+                _logger.error(f"Error HTTP al solicitar el token: {response.status}")
+                raise UserError(f"Error HTTP al solicitar el token: {response.status}")
 
-            response_data = response.data.decode('utf-8')
-            _logger.info(f"Respuesta obtenida del SII (token): {response_data}")
-            self.message_post(
-                body=f"Respuesta obtenida del SII (token):<br/><pre>{response_data}</pre>",
-                subject="Respuesta de Token SII",
-                message_type='notification',
-            )
+            # Log del XML de respuesta
+            _logger.info(f"Respuesta obtenida del SII (token):\n{response.data.decode('utf-8')}")
 
-            # Parsear la respuesta y extraer el token
-            root = etree.fromstring(response.data)
-            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
-            get_token_return = root.find('.//soapenv:Body/ns1:getTokenResponse/ns1:getTokenReturn', namespaces=ns)
+            # Parsear el XML de respuesta
+            response_xml = etree.fromstring(response.data)
+            ns = {
+                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
+                'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'
+            }
+            get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
 
-            if get_token_return is None:
-                raise Exception("No se pudo encontrar el nodo getTokenReturn en la respuesta del SII.")
+            if get_token_return is None or not get_token_return.text:
+                raise UserError("No se encontró el nodo getTokenReturn o su contenido está vacío en la respuesta del SII.")
 
-            decoded_token_xml = html.unescape(get_token_return.text)
-            token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
+            # Decodificar el XML interno del token
+            try:
+                decoded_token_xml = html.unescape(get_token_return.text)
+                token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
+            except etree.XMLSyntaxError as e:
+                raise UserError(f"Error al analizar el XML del token: {e}")
 
+            # Extraer el token
             token = token_root.find('.//TOKEN')
-            if token is None:
-                raise Exception("No se pudo encontrar el token en el XML decodificado.")
+            if token is None or not token.text:
+                raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
 
             _logger.info(f"Token obtenido correctamente: {token.text}")
             self.message_post(
@@ -380,8 +390,7 @@ class InvoiceMail(models.Model):
                 message_type='notification',
             )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
-
-                
+                    
     def _get_seed(self):
         """Solicita la semilla desde el SII y registra la salida en el chatter."""
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
