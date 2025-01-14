@@ -467,7 +467,7 @@ class InvoiceMail(models.Model):
 
     def _sign_seed(self, seed):
         """
-        Firma la semilla utilizando el certificado configurado en el modelo l10n_cl.certificate.
+        Firma la semilla utilizando el certificado configurado.
         """
         try:
             certificate = self._get_active_certificate()
@@ -486,7 +486,7 @@ class InvoiceMail(models.Model):
                 cert_base64.replace("-----BEGIN CERTIFICATE-----", "")
                 .replace("-----END CERTIFICATE-----", "")
                 .replace("\n", "")
-                .strip()  # Asegurarse de eliminar espacios adicionales
+                .strip()
             )
 
             # Crear los elementos de la firma
