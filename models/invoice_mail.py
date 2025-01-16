@@ -479,7 +479,7 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
 
-    #sig seed funcional ok
+    # _sign_seed actualizado
     def _sign_seed(self, seed):
         """
         Firma la semilla utilizando el certificado configurado.
@@ -487,18 +487,22 @@ class InvoiceMail(models.Model):
         try:
             certificate = self._get_active_certificate()
 
-            # Cargar el certificado y clave privada con cryptography
+            # Cargar el certificado y clave privada
             p12 = pkcs12.load_key_and_certificates(
                 base64.b64decode(certificate.signature_key_file),
                 certificate.signature_pass_phrase.encode(),
-                backend=default_backend()  # Importado correctamente
+                backend=default_backend()
             )
             private_key = p12[0]
             cert = p12[1]
 
+            if not private_key or not cert:
+                raise UserError("El certificado o la clave privada no se pudieron cargar correctamente.")
+
             # Limpiar el certificado en formato Base64
-            cert_base64_clean = base64.b64encode(cert.public_bytes(
-                encoding=serialization.Encoding.PEM)).decode('utf-8').replace(
+            cert_base64_clean = base64.b64encode(
+                cert.public_bytes(encoding=serialization.Encoding.PEM)
+            ).decode('utf-8').replace(
                 "-----BEGIN CERTIFICATE-----", "").replace(
                 "-----END CERTIFICATE-----", "").replace("\n", "").strip()
 
@@ -520,11 +524,19 @@ class InvoiceMail(models.Model):
             </SignedInfo>
             """
 
-            signature_value = base64.b64encode(private_key.sign(
-                signed_info.encode('utf-8'),
-                padding.PKCS1v15(),
-                hashes.SHA1()
-            )).decode('utf-8')
+            # Firmar el bloque SignedInfo
+            signature_value = base64.b64encode(
+                private_key.sign(
+                    signed_info.encode('utf-8'),
+                    padding.PKCS1v15(),
+                    hashes.SHA1()
+                )
+            ).decode('utf-8')
+
+            # Calcular el Modulus
+            modulus = private_key.public_key().public_numbers().n
+            modulus_bytes = modulus.to_bytes((modulus.bit_length() + 7) // 8, byteorder='big')
+            modulus_base64 = base64.b64encode(modulus_bytes).decode('utf-8')
 
             # Construir el XML firmado
             signed_seed = f"""
@@ -538,7 +550,7 @@ class InvoiceMail(models.Model):
                     <KeyInfo>
                         <KeyValue>
                             <RSAKeyValue>
-                                <Modulus>{self._get_private_key_modulus()}</Modulus>
+                                <Modulus>{modulus_base64}</Modulus>
                                 <Exponent>AQAB</Exponent>
                             </RSAKeyValue>
                         </KeyValue>
@@ -553,7 +565,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
-
 
     #check sdii status funcional ok
     def check_sii_status(self):
