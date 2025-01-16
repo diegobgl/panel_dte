@@ -315,13 +315,8 @@ class InvoiceMail(models.Model):
 
         try:
             _logger.info("Solicitando el token al SII.")
-            self.message_post(
-                body="Iniciando solicitud de token al SII.",
-                subject="Solicitud de Token",
-                message_type='notification',
-            )
 
-            # Crear la solicitud SOAP con el formato correcto
+            # Crear la solicitud SOAP
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -338,47 +333,25 @@ class InvoiceMail(models.Model):
                 'SOAPAction': 'urn:getToken'
             }
 
-            # Log del XML enviado
-            _logger.info(f"XML enviado al solicitar el token:\n{soap_request}")
-
             # Enviar la solicitud al servicio del SII
-            response = None
-            for attempt in range(3):  # Reintentar hasta 3 veces en caso de fallo
-                try:
-                    response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
-                    if response.status == 200:
-                        break
-                    _logger.warning(f"Intento {attempt + 1}: Error HTTP al solicitar el token, código: {response.status}")
-                except Exception as e:
-                    _logger.warning(f"Intento {attempt + 1}: Error al enviar la solicitud al SII: {e}")
-                    if attempt == 2:  # Si es el último intento, lanza la excepción
-                        raise UserError("No se pudo obtener el token tras múltiples intentos.")
+            response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
-            # Validar el código HTTP de la respuesta
+            # Validar la respuesta HTTP
             if response.status != 200:
                 _logger.error(f"Error HTTP al solicitar el token: {response.status}")
                 raise UserError(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Log del XML de respuesta
-            _logger.info(f"Respuesta obtenida del SII (token):\n{response.data.decode('utf-8')}")
-
             # Parsear el XML de respuesta
             response_xml = etree.fromstring(response.data)
-            ns = {
-                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'
-            }
+            ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
             get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
 
             if get_token_return is None or not get_token_return.text:
                 raise UserError("No se encontró el nodo getTokenReturn o su contenido está vacío en la respuesta del SII.")
 
             # Decodificar el XML interno del token
-            try:
-                decoded_token_xml = html.unescape(get_token_return.text)
-                token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
-            except etree.XMLSyntaxError as e:
-                raise UserError(f"Error al analizar el XML del token: {e}")
+            decoded_token_xml = html.unescape(get_token_return.text)
+            token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
 
             # Extraer el token
             token = token_root.find('.//TOKEN')
@@ -386,20 +359,10 @@ class InvoiceMail(models.Model):
                 raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
 
             _logger.info(f"Token obtenido correctamente: {token.text}")
-            self.message_post(
-                body=f"Token obtenido correctamente: {token.text}",
-                subject="Token Obtenido",
-                message_type='notification',
-            )
             return token.text
 
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
-            self.message_post(
-                body=f"Error al obtener el token desde el SII: {e}",
-                subject="Error al Obtener Token",
-                message_type='notification',
-            )
             raise UserError(f"Error al obtener el token desde el SII: {e}")
 
 
@@ -487,7 +450,7 @@ class InvoiceMail(models.Model):
         try:
             certificate = self._get_active_certificate()
 
-            # Cargar el certificado y clave privada
+            # Cargar el certificado y clave privada con cryptography
             p12 = pkcs12.load_key_and_certificates(
                 base64.b64decode(certificate.signature_key_file),
                 certificate.signature_pass_phrase.encode(),
@@ -496,23 +459,23 @@ class InvoiceMail(models.Model):
             private_key = p12[0]
             cert = p12[1]
 
-            if not private_key or not cert:
-                raise UserError("El certificado o la clave privada no se pudieron cargar correctamente.")
-
             # Limpiar el certificado en formato Base64
             cert_base64_clean = base64.b64encode(
                 cert.public_bytes(encoding=serialization.Encoding.PEM)
             ).decode('utf-8').replace(
-                "-----BEGIN CERTIFICATE-----", "").replace(
-                "-----END CERTIFICATE-----", "").replace("\n", "").strip()
+                "-----BEGIN CERTIFICATE-----", ""
+            ).replace(
+                "-----END CERTIFICATE-----", ""
+            ).replace("\n", "").strip()
 
-            # Crear los elementos de la firma
+            # Crear DigestValue
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
             digest_value = base64.b64encode(digest).decode('utf-8')
 
+            # Crear SignedInfo
             signed_info = f"""
-            <SignedInfo xmlns="http://www.w3.org/2009/xmldsig#">
-                <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+            <SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+                <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
                 <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
                 <Reference URI="">
                     <Transforms>
@@ -524,19 +487,12 @@ class InvoiceMail(models.Model):
             </SignedInfo>
             """
 
-            # Firmar el bloque SignedInfo
-            signature_value = base64.b64encode(
-                private_key.sign(
-                    signed_info.encode('utf-8'),
-                    padding.PKCS1v15(),
-                    hashes.SHA1()
-                )
-            ).decode('utf-8')
-
-            # Calcular el Modulus
-            modulus = private_key.public_key().public_numbers().n
-            modulus_bytes = modulus.to_bytes((modulus.bit_length() + 7) // 8, byteorder='big')
-            modulus_base64 = base64.b64encode(modulus_bytes).decode('utf-8')
+            # Crear SignatureValue
+            signature_value = base64.b64encode(private_key.sign(
+                signed_info.encode('utf-8'),
+                padding.PKCS1v15(),
+                hashes.SHA1()
+            )).decode('utf-8')
 
             # Construir el XML firmado
             signed_seed = f"""
@@ -550,7 +506,7 @@ class InvoiceMail(models.Model):
                     <KeyInfo>
                         <KeyValue>
                             <RSAKeyValue>
-                                <Modulus>{modulus_base64}</Modulus>
+                                <Modulus>{self._get_private_key_modulus(private_key)}</Modulus>
                                 <Exponent>AQAB</Exponent>
                             </RSAKeyValue>
                         </KeyValue>
@@ -561,14 +517,17 @@ class InvoiceMail(models.Model):
                 </Signature>
             </getToken>
             """
-            
-            # Publicar el XML en el chatter para depuración
-            self.post_xml_to_chatter(signed_seed, description="Semilla Firmada XML")
-
             return signed_seed
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
+
+    def _get_private_key_modulus(self, private_key):
+        """
+        Obtiene el módulo de la clave privada en formato Base64.
+        """
+        numbers = private_key.private_numbers()
+        return base64.b64encode(numbers.public_numbers.n.to_bytes((numbers.public_numbers.n.bit_length() + 7) // 8, byteorder='big')).decode('utf-8')
 
     #check sdii status funcional ok
     def check_sii_status(self):
