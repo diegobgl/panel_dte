@@ -479,7 +479,7 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
 
-    # _sign_seed actualizado
+        # _sign_seed actualizado
     def _sign_seed(self, seed):
         """
         Firma la semilla utilizando el certificado configurado.
@@ -511,8 +511,8 @@ class InvoiceMail(models.Model):
             digest_value = base64.b64encode(digest).decode('utf-8')
 
             signed_info = f"""
-            <SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
-                <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+            <SignedInfo xmlns="http://www.w3.org/2009/xmldsig#">
+                <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
                 <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
                 <Reference URI="">
                     <Transforms>
@@ -561,6 +561,10 @@ class InvoiceMail(models.Model):
                 </Signature>
             </getToken>
             """
+            
+            # Publicar el XML en el chatter para depuración
+            self.post_xml_to_chatter(signed_seed, description="Semilla Firmada XML")
+
             return signed_seed
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
