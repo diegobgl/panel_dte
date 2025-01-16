@@ -6,7 +6,8 @@ from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
 from lxml import etree
-from OpenSSL import crypto
+import cryptography
+from cryptography.hazmat.primitives.serialization import pkcs12
 import logging
 import hashlib
 import html
@@ -481,22 +482,20 @@ class InvoiceMail(models.Model):
         try:
             certificate = self._get_active_certificate()
 
-            # Cargar el certificado y la clave privada
-            p12 = crypto.load_pkcs12(
+            # Cargar el certificado y clave privada con cryptography
+            p12 = pkcs12.load_key_and_certificates(
                 base64.b64decode(certificate.signature_key_file),
-                certificate.signature_pass_phrase.encode()
+                certificate.signature_pass_phrase.encode(),
+                backend=default_backend()
             )
-            private_key = p12.get_privatekey()
-            cert = p12.get_certificate()
+            private_key = p12[0]
+            cert = p12[1]
 
-            # Limpieza del certificado en formato Base64
-            cert_base64 = base64.b64encode(crypto.dump_certificate(crypto.FILETYPE_PEM, cert)).decode('utf-8')
-            cert_base64_clean = (
-                cert_base64.replace("-----BEGIN CERTIFICATE-----", "")
-                .replace("-----END CERTIFICATE-----", "")
-                .replace("\n", "")
-                .strip()
-            )
+            # Limpiar el certificado en formato Base64
+            cert_base64_clean = base64.b64encode(cert.public_bytes(
+                encoding=serialization.Encoding.PEM)).decode('utf-8').replace(
+                "-----BEGIN CERTIFICATE-----", "").replace(
+                "-----END CERTIFICATE-----", "").replace("\n", "").strip()
 
             # Crear los elementos de la firma
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
@@ -515,11 +514,14 @@ class InvoiceMail(models.Model):
                 </Reference>
             </SignedInfo>
             """
-            signature_value = base64.b64encode(crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')).decode('utf-8')
 
-            modulus = base64.b64encode(crypto.dump_privatekey(crypto.FILETYPE_PEM, private_key)).decode('utf-8')
-            modulus_clean = modulus.replace("\n", "").strip()
+            signature_value = base64.b64encode(private_key.sign(
+                signed_info.encode('utf-8'),
+                padding.PKCS1v15(),
+                hashes.SHA1()
+            )).decode('utf-8')
 
+            # Construir el XML firmado
             signed_seed = f"""
             <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <item>
@@ -531,7 +533,7 @@ class InvoiceMail(models.Model):
                     <KeyInfo>
                         <KeyValue>
                             <RSAKeyValue>
-                                <Modulus>{modulus_clean}</Modulus>
+                                <Modulus>{self._get_private_key_modulus()}</Modulus>
                                 <Exponent>AQAB</Exponent>
                             </RSAKeyValue>
                         </KeyValue>
@@ -543,7 +545,6 @@ class InvoiceMail(models.Model):
             </getToken>
             """
             return signed_seed
-
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
@@ -649,13 +650,16 @@ class InvoiceMail(models.Model):
 
 
     #def validate xml funcional ok
-    def validate_xml_response(response_data):
+    def _validate_sii_response(self, response_data):
         try:
             root = etree.fromstring(response_data)
+            estado = root.find('.//ESTADO')
+            if estado is None or estado.text != "00":
+                raise UserError(f"Error en la respuesta del SII: {estado.text if estado is not None else 'Desconocido'}")
             return root
-        except etree.XMLSyntaxError as e:
-            _logger.error(f"El XML de respuesta no es válido: {e}")
-            raise UserError("El XML recibido del SII no es válido. Verifique la respuesta del servicio.")
+        except Exception as e:
+            raise UserError(f"Respuesta del SII no válida: {e}")
+
 
 
     # DEF POST XML TO CHATTER FUNCIONAL OK
