@@ -7,6 +7,7 @@ import base64
 import xml.etree.ElementTree as ET
 from lxml import etree
 import cryptography
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import pkcs12
 import logging
 import hashlib
@@ -486,7 +487,7 @@ class InvoiceMail(models.Model):
             p12 = pkcs12.load_key_and_certificates(
                 base64.b64decode(certificate.signature_key_file),
                 certificate.signature_pass_phrase.encode(),
-                backend=default_backend()
+                backend=default_backend()  # Importado correctamente
             )
             private_key = p12[0]
             cert = p12[1]
