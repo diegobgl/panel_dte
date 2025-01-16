@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from lxml import etree
 import cryptography
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import pkcs12
 import logging
 import hashlib
