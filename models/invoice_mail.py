@@ -379,55 +379,37 @@ class InvoiceMail(models.Model):
 
     def _sign_seed(self, seed):
         """
-        Firma la semilla utilizando OpenSSL con el certificado configurado.
+        Firma la semilla utilizando el certificado activo configurado en el sistema.
+
+        :param seed: La semilla proporcionada por el SII.
+        :return: Semilla firmada en formato XML.
         """
         try:
             # Obtener el certificado activo
             certificate = self._get_active_certificate()
+            if not certificate.private_key or not certificate.certificate:
+                raise UserError("El certificado o la clave privada no están configurados correctamente.")
 
-            # Decodificar el certificado y la clave privada
-            try:
-                private_key_data = base64.b64decode(certificate.signature_key_file)
-                cert_data = base64.b64decode(certificate.signature_cert_file)
-            except Exception as e:
-                _logger.error(f"Error al decodificar los archivos de clave/certificado: {e}")
-                raise UserError("Los datos del certificado o la clave privada no están correctamente codificados en Base64.")
+            # Crear el XML base con la semilla
+            root = etree.Element("getToken")
+            item = etree.SubElement(root, "item")
+            etree.SubElement(item, "Semilla").text = seed
 
-            # Validar el contenido de la clave y el certificado
-            if not private_key_data.startswith(b"-----BEGIN PRIVATE KEY-----"):
-                raise UserError("El archivo de clave privada no tiene el formato PEM esperado.")
-            if not cert_data.startswith(b"-----BEGIN CERTIFICATE-----"):
-                raise UserError("El archivo de certificado no tiene el formato PEM esperado.")
-
-            # Cargar la clave privada
-            private_key = crypto.load_privatekey(
-                crypto.FILETYPE_PEM,
-                private_key_data,
-                passphrase=certificate.signature_pass_phrase.encode() if certificate.signature_pass_phrase else None
+            # Configurar el firmador usando SHA256
+            signer = XMLSigner(
+                method=methods.enveloped,  # Firma embebida en el XML
+                signature_algorithm="rsa-sha256",  # Algoritmo de firma
+                digest_algorithm="sha256"  # Algoritmo de hash
             )
 
-            # Cargar el certificado
-            cert = crypto.load_certificate(crypto.FILETYPE_PEM, cert_data)
-
-            # Construir el XML base
-            seed_xml = f"""
-            <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
-                <item>
-                    <Semilla>{seed}</Semilla>
-                </item>
-            </getToken>
-            """
-
             # Firmar el XML
-            signed_xml = crypto.sign(private_key, seed_xml.encode('utf-8'), 'sha256')
+            signed_root = signer.sign(
+                root,
+                key=certificate.private_key.encode('utf-8'),  # Clave privada en formato PEM
+                cert=certificate.certificate.encode('utf-8')  # Certificado en formato PEM
+            )
 
-            # Construir el XML firmado
-            signed_root = etree.Element("SignedSeed")
-            etree.SubElement(signed_root, "OriginalSeed").text = seed
-            signature = etree.SubElement(signed_root, "Signature")
-            signature.text = base64.b64encode(signed_xml).decode()
-
-            # Convertir el XML firmado a cadena
+            # Convertir el XML firmado a string
             signed_seed = etree.tostring(signed_root, encoding="UTF-8").decode("utf-8")
 
             _logger.info("Semilla firmada correctamente.")
@@ -436,6 +418,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
+
 
 
     def _get_private_key_modulus(self, private_key):
