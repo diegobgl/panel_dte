@@ -5,15 +5,14 @@ from odoo.tools import email_split
 from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
-import signxml
 from lxml import etree
-from signxml import XMLSigner, XMLVerifier, methods 
 import logging
 import html
 from OpenSSL import crypto
 from cryptography.hazmat.primitives import serialization
 
 _logger = logging.getLogger(__name__)
+
 
 
 class InvoiceMail(models.Model):
@@ -206,14 +205,13 @@ class InvoiceMail(models.Model):
         self.state = 'rejected'
 
     def _get_active_certificate(self):
-        """Busca el certificado activo y válido. Lanza un error si no lo encuentra."""
+        """Busca el certificado activo y válido configurado en el sistema."""
         certificate = self.env['l10n_cl.certificate'].sudo().search([], limit=1)
         if not certificate:
-            raise UserError("No se encontró ningún certificado configurado en el sistema.")
+            raise UserError("No se encontró ningún certificado configurado.")
         if not certificate._is_valid_certificate():
             raise UserError("El certificado configurado está expirado o no es válido.")
         return certificate
-    
 
 
     # get dte claim funcional ok
@@ -307,78 +305,45 @@ class InvoiceMail(models.Model):
    
    
     def _get_token(self, signed_seed):
+        """Solicita el token al SII utilizando la semilla firmada."""
+        token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
+        try:
+            soap_request = f"""
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <getToken xmlns="https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws">
+                        <pszXml><![CDATA[{signed_seed}]]></pszXml>
+                    </getToken>
+                </soapenv:Body>
+            </soapenv:Envelope>
             """
-            Solicita el token al SII utilizando la semilla firmada.
-            """
-            token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"  # Reemplazar con URL correcta
+            response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
+            response_xml = etree.fromstring(response_data.encode('utf-8'))
+            ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
+            get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
 
-            try:
-                _logger.info("Solicitando el token al SII.")
-
-                soap_request = f"""
-                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-                    <soapenv:Header/>
-                    <soapenv:Body>
-                        <getToken xmlns="https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws">
-                            <pszXml><![CDATA[{signed_seed}]]></pszXml>
-                        </getToken>
-                    </soapenv:Body>
-                </soapenv:Envelope>
-                """
-                self.save_signed_xml(signed_seed)
-                self.post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
-
-                response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
-
-                response_xml = etree.fromstring(response_data.encode('utf-8')) # Codifica la respuesta a bytes
-                ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
-                get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
-
-                if get_token_return is None or not get_token_return.text:
-                    raise UserError("No se encontró el nodo getTokenReturn o su contenido está vacío en la respuesta del SII.")
-
-                decoded_token_xml = html.unescape(get_token_return.text)
-                token_root = etree.fromstring(decoded_token_xml.encode('utf-8')) # Codifica la respuesta a bytes
-
-                token = token_root.find('.//TOKEN')
-                if token is None or not token.text:
-                    raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
-
-                _logger.info(f"Token obtenido correctamente: {token.text}")
-                return token.text
-
-            except Exception as e:
-                _logger.error(f"Error al obtener el token desde el SII: {e}")
-                raise UserError(f"Error al obtener el token desde el SII: {e}")
+            if not get_token_return or not get_token_return.text:
+                raise UserError("No se encontró el token en la respuesta del SII.")
+            token_root = etree.fromstring(html.unescape(get_token_return.text))
+            token = token_root.find('.//TOKEN')
+            if not token or not token.text:
+                raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
+            _logger.info(f"Token obtenido correctamente: {token.text}")
+            return token.text
+        except Exception as e:
+            _logger.error(f"Error al obtener el token: {e}")
+            raise UserError(f"Error al obtener el token: {e}")
 
     def _send_soap_request(self, url, soap_body, soap_action_header):
-        """
-        Envía una solicitud SOAP al SII.
-
-        :param url: URL del servicio web del SII.
-        :param soap_body: Cuerpo de la solicitud SOAP en formato XML.
-        :param soap_action_header: Valor para el header SOAPAction.
-        :return: Respuesta del SII como string.
-        """
-        http = urllib3.PoolManager()
-        headers = {
-            'Content-Type': 'text/xml; charset=utf-8',
-            'SOAPAction': soap_action_header
-        }
-
+        """Envía una solicitud SOAP y devuelve la respuesta."""
         try:
+            http = urllib3.PoolManager()
+            headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': soap_action_header}
             response = http.request('POST', url, body=soap_body.encode('utf-8'), headers=headers)
-
             if response.status != 200:
-                _logger.error(f"Error HTTP {response.status} al enviar solicitud a {url}")
                 raise UserError(f"Error HTTP {response.status} al enviar solicitud a {url}")
-
-            response_data = response.data.decode('utf-8')
-            _logger.info(f"Respuesta de {url}:\n{response_data}")
-            self.post_xml_to_chatter(response_data, description=f"Respuesta del SII para {soap_action_header}")
-
-            return response_data
-
+            return response.data.decode('utf-8')
         except Exception as e:
             _logger.error(f"Error al enviar solicitud SOAP a {url}: {e}")
             raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
@@ -386,91 +351,51 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-            """Solicita la semilla desde el SII y registra la salida en el chatter."""
-            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
-
-            try:
-                _logger.info("Solicitando la semilla al SII.")
-                self.sudo().message_post(
-                    body="Iniciando solicitud de semilla al SII.",
-                    subject="Solicitud de Semilla",
-                    message_type='notification',
-                )
-
-                soap_request = """
-                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-                    <soapenv:Header/>
-                    <soapenv:Body>
-                        <getSeed/>
-                    </soapenv:Body>
-                </soapenv:Envelope>
-                """
-                response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
-
-                root = etree.fromstring(response_data.encode('utf-8')) # Codifica la respuesta a bytes
-                ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
-                get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
-
-                if get_seed_return is None:
-                    raise Exception("No se pudo encontrar el nodo getSeedReturn en la respuesta del SII.")
-
-                decoded_response = html.unescape(get_seed_return.text)
-                seed_root = etree.fromstring(decoded_response.encode('utf-8')) # Codifica la respuesta a bytes
-
-                estado = seed_root.find('.//ESTADO').text
-                if estado != "00":
-                    glosa = seed_root.find('.//GLOSA').text or "Sin detalles."
-                    raise Exception(f"Error al generar la semilla: {glosa}")
-
-                semilla = seed_root.find('.//SEMILLA').text
-                if not semilla:
-                    raise Exception("No se pudo encontrar la semilla en la respuesta del SII.")
-
-                self.sudo().message_post(
-                    body=f"Semilla obtenida correctamente: {semilla}",
-                    subject="Semilla Obtenida",
-                    message_type='notification',
-                )
-
-                return semilla
-
-            except Exception as e:
-                _logger.error(f"Error al obtener la semilla desde el SII: {e}")
-                self.sudo().message_post(
-                    body=f"Error al obtener la semilla desde el SII: {e}",
-                    subject="Error al Obtener Semilla",
-                    message_type='notification',
-                )
-                raise UserError(f"Error al obtener la semilla desde el SII: {e}")
+        """Solicita la semilla desde el SII y la registra en el chatter."""
+        seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+        try:
+            soap_request = """
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <getSeed/>
+                </soapenv:Body>
+            </soapenv:Envelope>
+            """
+            response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
+            root = etree.fromstring(response_data.encode('utf-8'))
+            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+            get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
+            decoded_response = html.unescape(get_seed_return.text)
+            seed_root = etree.fromstring(decoded_response.encode('utf-8'))
+            seed = seed_root.find('.//SEMILLA').text
+            if not seed:
+                raise UserError("No se pudo obtener la semilla.")
+            _logger.info(f"Semilla obtenida: {seed}")
+            return seed
+        except Exception as e:
+            _logger.error(f"Error al obtener la semilla: {e}")
+            raise UserError(f"Error al obtener la semilla: {e}")
 
     def _sign_seed(self, seed):
+        """Firma la semilla utilizando los métodos estándar de Odoo."""
         try:
-            # Obtén el certificado activo
             certificate = self._get_active_certificate()
-
-            # Crea el XML base con la semilla
-            root = etree.Element("getToken")
-            item = etree.SubElement(root, "item")
-            etree.SubElement(item, "Semilla").text = seed
-
-            # Configura el firmador para usar SHA-1
-            signer = XMLSigner(
-                method=methods.enveloped,
-                signature_algorithm="rsa-sha1",
-                digest_algorithm="sha1"
+            seed_xml = f"""
+            <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
+                <item>
+                    <Semilla>{seed}</Semilla>
+                </item>
+            </getToken>
+            """
+            signed_seed = self.env['l10n_cl.edi.util'].sign(
+                xml_string=seed_xml,
+                certificate=certificate.signature_cert_file,
+                private_key=certificate.signature_key_file,
+                passphrase=certificate.signature_pass_phrase,
             )
-
-            # Firma el XML con el certificado y la clave privada
-            signed_root = signer.sign(
-                root,
-                key=base64.b64decode(certificate.signature_key_file),
-                cert=base64.b64decode(certificate.signature_cert_file),
-                passphrase=certificate.signature_pass_phrase.encode()
-            )
-
-            signed_seed = etree.tostring(signed_root, encoding="UTF-8").decode("utf-8")
+            _logger.info("Semilla firmada correctamente.")
             return signed_seed
-
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
