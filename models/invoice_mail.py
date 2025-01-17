@@ -5,6 +5,7 @@ from odoo.tools import email_split
 from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
+import signxml
 from lxml import etree
 from signxml import XMLSigner, XMLVerifier
 import logging
