@@ -307,10 +307,10 @@ class InvoiceMail(models.Model):
     
     
 
-    #get token funcional 
+        #get token funcional 
     def _get_token(self, signed_seed):
         """
-        Solicita el token al SII utilizando la semilla firmada.
+        Solicita el token al SII utilizando la semilla firmada y registra XML en el Chatter.
         """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         http = urllib3.PoolManager()
@@ -335,6 +335,9 @@ class InvoiceMail(models.Model):
                 'SOAPAction': 'urn:getToken'
             }
 
+            # Publicar solicitud en el Chatter
+            self.post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
+
             # Enviar la solicitud al servicio del SII
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
 
@@ -344,6 +347,12 @@ class InvoiceMail(models.Model):
                 raise UserError(f"Error HTTP al solicitar el token: {response.status}")
 
             # Parsear el XML de respuesta
+            response_data = response.data.decode('utf-8')
+            _logger.info(f"Respuesta del SII:\n{response_data}")
+
+            # Publicar respuesta en el Chatter
+            self.post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Token")
+
             response_xml = etree.fromstring(response.data)
             ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
             get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
@@ -535,34 +544,28 @@ class InvoiceMail(models.Model):
         numbers = private_key.private_numbers()
         return base64.b64encode(numbers.public_numbers.n.to_bytes((numbers.public_numbers.n.bit_length() + 7) // 8, byteorder='big')).decode('utf-8')
 
-    #check sdii status funcional ok
     def check_sii_status(self):
         """
-        Consulta el estado del DTE en el SII utilizando las funciones indicadas:
-        - Solicita la semilla
-        - Firma la semilla
-        - Envía la semilla firmada y obtiene el token
-        - Realiza la consulta del estado del DTE con el token
+        Consulta el estado del DTE en el SII y registra los XML generados en el Chatter.
         """
         self.ensure_one()
         try:
             _logger.info(f"Consultando el estado del DTE en el SII para el RUT: {self.company_rut}, TipoDoc: {self.document_type}, Folio: {self.folio_number}")
 
-            # 1. Solicitar la semilla
+            # Solicitar la semilla
             seed = self._get_seed()
             _logger.info(f"Semilla obtenida: {seed}")
 
-            # 2. Firmar la semilla
+            # Firmar la semilla
             signed_seed = self._sign_seed(seed)
-            _logger.info(f"Semilla firmada correctamente.")
+            _logger.info("Semilla firmada correctamente.")
 
-            # 3. Obtener el token
+            # Obtener el token
             token = self._get_token(signed_seed)
             _logger.info(f"Token obtenido correctamente: {token}")
 
-            # 4. Consultar el estado del DTE usando el token
-            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
-            soap_body = f"""
+            # Construir el cuerpo de la solicitud SOAP para consultar estado del DTE
+            soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
                 <soapenv:Header/>
                 <soapenv:Body>
@@ -583,41 +586,27 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            # Registrar el XML generado en el chatter
-            self.message_post(
-                body=f"<b>Solicitud de estado del DTE:</b><br/><pre>{soap_body}</pre>",
-                subject="Solicitud de Estado DTE",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
+            # Registrar la solicitud en el Chatter
+            self.post_xml_to_chatter(soap_request, description="Solicitud de Estado del DTE al SII")
 
-            # 5. Enviar la solicitud al SII
+            # Enviar la solicitud
+            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
             http = urllib3.PoolManager()
             headers = {'Content-Type': 'text/xml; charset=utf-8'}
-            response = http.request(
-                'POST',
-                status_url,
-                body=soap_body.encode('utf-8'),
-                headers=headers,
-            )
+            response = http.request('POST', status_url, body=soap_request.encode('utf-8'), headers=headers)
 
             # Validar la respuesta HTTP
             if response.status != 200:
                 _logger.error(f"Error HTTP al consultar el estado del DTE: {response.status}")
                 raise UserError(f"Error HTTP al consultar el estado del DTE: {response.status}. Verifique la URL o el estado del servicio.")
 
-            # Parsear la respuesta
+            # Parsear la respuesta y registrar en el Chatter
+            response_data = response.data.decode('utf-8')
+            self.post_xml_to_chatter(response_data, description="Respuesta del SII para Consulta de Estado DTE")
+
             response_root = etree.fromstring(response.data)
             sii_response = response_root.find('.//SII:RESP_HDR/ESTADO', namespaces={'SII': 'http://www.sii.cl/XMLSchema'})
             sii_status = sii_response.text if sii_response is not None else 'unknown'
-
-            # Registrar la respuesta en el chatter
-            self.message_post(
-                body=f"<b>Respuesta del SII:</b><br/><pre>{etree.tostring(response_root, pretty_print=True).decode()}</pre>",
-                subject="Respuesta de Estado DTE",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
 
             _logger.info(f"Estado del DTE recibido del SII: {sii_status}")
 
@@ -658,7 +647,7 @@ class InvoiceMail(models.Model):
         """
         try:
             # Escapar caracteres especiales para mostrar el XML en formato legible en el chatter
-            escaped_xml = html.escape(xml_content)
+            escaped_xml = xml_content.replace('<', '&lt;').replace('>', '&gt;')
 
             # Publicar el mensaje en el Chatter
             self.message_post(
@@ -670,7 +659,7 @@ class InvoiceMail(models.Model):
                 message_type='comment',
                 subtype_xmlid='mail.mt_note',
             )
-            _logger.info("El XML ha sido registrado en el Chatter con éxito.")
+            _logger.info(f"El XML ha sido registrado en el Chatter con éxito: {description}.")
         except Exception as e:
             _logger.error(f"Error al registrar el XML en el Chatter: {e}")
             raise UserError(f"Error al registrar el XML en el Chatter: {e}")
