@@ -442,15 +442,19 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
 
-        # _sign_seed actualizado
+
+
+
+    # _sign_seed actualizado
     def _sign_seed(self, seed):
         """
         Firma la semilla utilizando el certificado configurado.
         """
         try:
+            # Obtener el certificado activo
             certificate = self._get_active_certificate()
 
-            # Cargar el certificado y clave privada con cryptography
+            # Cargar el certificado y clave privada
             p12 = pkcs12.load_key_and_certificates(
                 base64.b64decode(certificate.signature_key_file),
                 certificate.signature_pass_phrase.encode(),
@@ -468,11 +472,11 @@ class InvoiceMail(models.Model):
                 "-----END CERTIFICATE-----", ""
             ).replace("\n", "").strip()
 
-            # Crear DigestValue
+            # Calcular el DigestValue
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
             digest_value = base64.b64encode(digest).decode('utf-8')
 
-            # Crear SignedInfo
+            # Crear el bloque SignedInfo
             signed_info = f"""
             <SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
@@ -487,7 +491,7 @@ class InvoiceMail(models.Model):
             </SignedInfo>
             """
 
-            # Crear SignatureValue
+            # Firmar el bloque SignedInfo
             signature_value = base64.b64encode(private_key.sign(
                 signed_info.encode('utf-8'),
                 padding.PKCS1v15(),
