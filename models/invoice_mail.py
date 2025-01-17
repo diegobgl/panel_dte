@@ -57,6 +57,8 @@ class InvoiceMail(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
+    xml_signed_file = fields.Binary(string="Archivo XML Firmado", attachment=True)
+
 
 
 
@@ -645,7 +647,7 @@ class InvoiceMail(models.Model):
 
 
 
-    # DEF POST XML TO CHATTER FUNCIONAL OK
+        # DEF POST XML TO CHATTER FUNCIONAL OK
     def post_xml_to_chatter(self, xml_content, description="XML generado para el SII"):
         """
         Registra el contenido de un XML en el Chatter de Odoo.
@@ -656,7 +658,7 @@ class InvoiceMail(models.Model):
         """
         try:
             # Escapar caracteres especiales para mostrar el XML en formato legible en el chatter
-            escaped_xml = xml_content.replace('<', '&lt;').replace('>', '&gt;')
+            escaped_xml = html.escape(xml_content)
 
             # Publicar el mensaje en el Chatter
             self.message_post(
@@ -698,6 +700,17 @@ class InvoiceMail(models.Model):
             return base64.b64encode(signature).decode('utf-8')
         except Exception as e:
             raise UserError(f"Error al generar el SignatureValue: {str(e)}")
+
+
+
+    def save_signed_xml(self, xml_signed):
+        """
+        Guarda el XML firmado en el registro actual.
+        """
+        self.xml_signed_file = base64.b64encode(xml_signed.encode('utf-8'))
+        _logger.info("El XML firmado ha sido almacenado correctamente.")
+
+
 
 class InvoiceMailLine(models.Model):
     _name = 'invoice.mail.line'

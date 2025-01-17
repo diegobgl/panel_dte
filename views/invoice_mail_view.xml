@@ -91,6 +91,9 @@
                                 </tree>
                             </field>
                         </page>
+                        <page string="XML enviado">
+                            <field name="xml_signed_file" filename="name"/>
+                        </page>
                     </notebook>
                 </sheet>
                 <div class="oe_chatter">
