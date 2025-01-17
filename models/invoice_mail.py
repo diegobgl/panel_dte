@@ -382,41 +382,45 @@ class InvoiceMail(models.Model):
 
     def _sign_seed(self, seed):
         """
-        Firma la semilla manualmente utilizando cryptography y construye el XML firmado.
-
-        :param seed: La semilla proporcionada por el SII.
-        :return: Semilla firmada en formato XML.
+        Firma la semilla utilizando el archivo .pfx y la contraseña almacenados en el modelo `l10n_cl.certificate`.
         """
         try:
             # Obtener el certificado activo
             certificate = self._get_active_certificate()
-            if not certificate.private_key or not certificate.certificate:
-                raise UserError("El certificado o la clave privada no están configurados correctamente.")
+            if not certificate.signature_key_file or not certificate.signature_pass_phrase:
+                raise UserError("El archivo .pfx o la contraseña no están configurados correctamente.")
 
-            # Decodificar la clave privada si está en Base64
-            private_key_data = base64.b64decode(certificate.private_key)
-            
-            # Cargar la clave privada
+            # Cargar y extraer clave privada y certificado desde el archivo .pfx
+            pfx_data = base64.b64decode(certificate.signature_key_file)
+            p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
+
+            # Extraer clave privada y certificado en formato PEM
+            private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
+            cert_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
+
+            # Cargar la clave privada con cryptography
             private_key = load_pem_private_key(
-                private_key_data,
-                password=certificate.signature_pass_phrase.encode('utf-8') if certificate.signature_pass_phrase else None,
+                private_key_pem,
+                password=None,
                 backend=default_backend()
             )
 
             # Crear el hash de la semilla
-            seed_hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
-            seed_hash.update(seed.encode('utf-8'))
-            seed_digest = seed_hash.finalize()
+            digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+            digest.update(seed.encode('utf-8'))
+            seed_hash = digest.finalize()
 
-            # Firmar el hash
+            # Firmar el hash con la clave privada
             signature = private_key.sign(
-                seed_digest,
+                seed_hash,
                 padding.PKCS1v15(),
                 hashes.SHA256()
             )
+
+            # Convertir la firma a Base64
             signature_b64 = base64.b64encode(signature).decode('utf-8')
 
-            # Crear el XML firmado
+            # Construir el XML firmado
             root = etree.Element("getToken")
             item = etree.SubElement(root, "item")
             etree.SubElement(item, "Semilla").text = seed
