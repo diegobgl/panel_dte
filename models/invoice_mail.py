@@ -308,9 +308,7 @@ class InvoiceMail(models.Model):
    
    
     def _get_token(self, signed_seed):
-        """
-        Solicita el token al SII utilizando la semilla firmada.
-        """
+        """Solicita el token al SII utilizando la semilla firmada."""
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         try:
             soap_request = f"""
@@ -323,19 +321,13 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-
-            # Registrar solicitud en el Chatter y en los logs
-            self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
+            self.post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
             _logger.info(f"XML enviado al SII para obtener token: {soap_request}")
 
-            # Enviar solicitud SOAP
             response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
-
-            # Registrar respuesta en el Chatter y en los logs
-            self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII al solicitar Token")
+            self.post_xml_to_chatter(response_data, description="Respuesta del SII al solicitar Token")
             _logger.info(f"Respuesta XML del SII: {response_data}")
 
-            # Procesar respuesta
             response_xml = etree.fromstring(response_data.encode('utf-8'))
             ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
             get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
@@ -395,17 +387,28 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
+            self.post_xml_to_chatter(soap_request, description="Solicitud de Semilla al SII")
+
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
+
             root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
+
+            if not get_seed_return or not get_seed_return.text:
+                raise UserError("No se pudo obtener la semilla.")
+
             decoded_response = html.unescape(get_seed_return.text)
             seed_root = etree.fromstring(decoded_response.encode('utf-8'))
             seed = seed_root.find('.//SEMILLA').text
+
             if not seed:
-                raise UserError("No se pudo obtener la semilla.")
+                raise UserError("No se pudo extraer la semilla del XML de respuesta.")
+
             _logger.info(f"Semilla obtenida: {seed}")
+            self.post_xml_to_chatter(decoded_response, description="Semilla obtenida del SII")
             return seed
+
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
             raise UserError(f"Error al obtener la semilla: {e}")
@@ -415,42 +418,25 @@ class InvoiceMail(models.Model):
         Firma la semilla utilizando el archivo .pfx y la contraseña almacenados en el modelo `l10n_cl.certificate`.
         """
         try:
-            # Obtener el certificado activo
             certificate = self._get_active_certificate()
             if not certificate.signature_key_file or not certificate.signature_pass_phrase:
                 raise UserError("El archivo .pfx o la contraseña no están configurados correctamente.")
 
-            # Cargar y extraer clave privada y certificado desde el archivo .pfx
             pfx_data = base64.b64decode(certificate.signature_key_file)
             p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
 
-            # Extraer clave privada y certificado en formato PEM
             private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
             cert_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
 
-            # Cargar la clave privada con cryptography
-            private_key = load_pem_private_key(
-                private_key_pem,
-                password=None,
-                backend=default_backend()
-            )
+            private_key = load_pem_private_key(private_key_pem, password=None, backend=default_backend())
 
-            # Crear el hash de la semilla
             digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
             digest.update(seed.encode('utf-8'))
             seed_hash = digest.finalize()
 
-            # Firmar el hash con la clave privada
-            signature = private_key.sign(
-                seed_hash,
-                padding.PKCS1v15(),
-                hashes.SHA256()
-            )
-
-            # Convertir la firma a Base64
+            signature = private_key.sign(seed_hash, padding.PKCS1v15(), hashes.SHA256())
             signature_b64 = base64.b64encode(signature).decode('utf-8')
 
-            # Construir el XML firmado
             root = etree.Element("getToken")
             item = etree.SubElement(root, "item")
             etree.SubElement(item, "Semilla").text = seed
@@ -458,6 +444,7 @@ class InvoiceMail(models.Model):
 
             signed_seed = etree.tostring(root, encoding="UTF-8", xml_declaration=True).decode("utf-8")
             _logger.info("Semilla firmada correctamente.")
+            self.post_xml_to_chatter(signed_seed, description="Semilla firmada")
             return signed_seed
 
         except Exception as e:
