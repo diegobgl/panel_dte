@@ -421,6 +421,7 @@ class InvoiceMail(models.Model):
 
 
 
+
     def _get_private_key_modulus(self, private_key):
         """
         Obtiene el módulo de la clave privada en formato Base64.
