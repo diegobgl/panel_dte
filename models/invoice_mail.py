@@ -378,9 +378,14 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al obtener la semilla: {e}")
 
     def _sign_seed(self, seed):
-        """Firma la semilla utilizando los métodos estándar de Odoo."""
+        """
+        Firma la semilla utilizando OpenSSL con el certificado configurado.
+        """
         try:
+            # Obtener el certificado activo
             certificate = self._get_active_certificate()
+
+            # Construir el XML base
             seed_xml = f"""
             <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
                 <item>
@@ -388,17 +393,36 @@ class InvoiceMail(models.Model):
                 </item>
             </getToken>
             """
-            signed_seed = self.env['l10n_cl.edi.util'].sign(
-                xml_string=seed_xml,
-                certificate=certificate.signature_cert_file,
-                private_key=certificate.signature_key_file,
-                passphrase=certificate.signature_pass_phrase,
+
+            # Cargar la clave privada
+            private_key = crypto.load_privatekey(
+                crypto.FILETYPE_PEM,
+                base64.b64decode(certificate.signature_key_file),
+                passphrase=certificate.signature_pass_phrase.encode() if certificate.signature_pass_phrase else None
             )
+
+            # Cargar el certificado
+            cert = crypto.load_certificate(crypto.FILETYPE_PEM, base64.b64decode(certificate.signature_cert_file))
+
+            # Firmar el XML
+            signed_xml = crypto.sign(private_key, seed_xml.encode('utf-8'), 'sha256')
+
+            # Construir el XML firmado
+            signed_root = etree.Element("SignedSeed")
+            etree.SubElement(signed_root, "OriginalSeed").text = seed
+            signature = etree.SubElement(signed_root, "Signature")
+            signature.text = base64.b64encode(signed_xml).decode()
+
+            # Convertir el XML firmado a cadena
+            signed_seed = etree.tostring(signed_root, encoding="UTF-8").decode("utf-8")
+
             _logger.info("Semilla firmada correctamente.")
             return signed_seed
+
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
+
 
 
     def _get_private_key_modulus(self, private_key):
