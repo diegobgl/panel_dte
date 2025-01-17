@@ -444,9 +444,6 @@ class InvoiceMail(models.Model):
                 raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
     def _sign_seed(self, seed):
-        """
-        Firma la semilla utilizando el certificado configurado y la librería signxml.
-        """
         try:
             # Obtén el certificado activo
             certificate = self._get_active_certificate()
@@ -456,21 +453,21 @@ class InvoiceMail(models.Model):
             item = etree.SubElement(root, "item")
             etree.SubElement(item, "Semilla").text = seed
 
-            # Usar `signxml` para firmar
+            # Configura el firmador para usar SHA-1
             signer = XMLSigner(
-                method=methods.enveloped,  # Usa el método correcto desde `signxml.methods`
+                method=methods.enveloped,
                 signature_algorithm="rsa-sha1",
-                digest_algorithm="sha1",
-                c14n_algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+                digest_algorithm="sha1"
             )
+
+            # Firma el XML con el certificado y la clave privada
             signed_root = signer.sign(
                 root,
                 key=base64.b64decode(certificate.signature_key_file),
                 cert=base64.b64decode(certificate.signature_cert_file),
-                passphrase=certificate.signature_pass_phrase.encode(),
+                passphrase=certificate.signature_pass_phrase.encode()
             )
 
-            # Convierte el XML firmado en string
             signed_seed = etree.tostring(signed_root, encoding="UTF-8").decode("utf-8")
             return signed_seed
 
