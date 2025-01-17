@@ -301,6 +301,8 @@ class InvoiceMail(models.Model):
     
 
         #get token funcional 
+   
+   
     def _get_token(self, signed_seed):
             """
             Solicita el token al SII utilizando la semilla firmada.
@@ -325,7 +327,7 @@ class InvoiceMail(models.Model):
 
                 response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
 
-                response_xml = etree.fromstring(response_data)
+                response_xml = etree.fromstring(response_data.encode('utf-8')) # Codifica la respuesta a bytes
                 ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
                 get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
 
@@ -333,7 +335,7 @@ class InvoiceMail(models.Model):
                     raise UserError("No se encontró el nodo getTokenReturn o su contenido está vacío en la respuesta del SII.")
 
                 decoded_token_xml = html.unescape(get_token_return.text)
-                token_root = etree.fromstring(decoded_token_xml.encode('utf-8'))
+                token_root = etree.fromstring(decoded_token_xml.encode('utf-8')) # Codifica la respuesta a bytes
 
                 token = token_root.find('.//TOKEN')
                 if token is None or not token.text:
@@ -345,7 +347,6 @@ class InvoiceMail(models.Model):
             except Exception as e:
                 _logger.error(f"Error al obtener el token desde el SII: {e}")
                 raise UserError(f"Error al obtener el token desde el SII: {e}")
-
 
     def _send_soap_request(self, url, soap_body, soap_action_header):
         """
@@ -382,63 +383,62 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        """Solicita la semilla desde el SII y registra la salida en el chatter."""
-        seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"  # Reemplazar con URL correcta si es diferente
+            """Solicita la semilla desde el SII y registra la salida en el chatter."""
+            seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
 
-        try:
-            _logger.info("Solicitando la semilla al SII.")
-            self.sudo().message_post(
-                body="Iniciando solicitud de semilla al SII.",
-                subject="Solicitud de Semilla",
-                message_type='notification',
-            )
+            try:
+                _logger.info("Solicitando la semilla al SII.")
+                self.sudo().message_post(
+                    body="Iniciando solicitud de semilla al SII.",
+                    subject="Solicitud de Semilla",
+                    message_type='notification',
+                )
 
-            soap_request = """
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-                <soapenv:Header/>
-                <soapenv:Body>
-                    <getSeed/>
-                </soapenv:Body>
-            </soapenv:Envelope>
-            """
-            response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
+                soap_request = """
+                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                    <soapenv:Header/>
+                    <soapenv:Body>
+                        <getSeed/>
+                    </soapenv:Body>
+                </soapenv:Envelope>
+                """
+                response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            root = etree.fromstring(response_data)
-            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
-            get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
+                root = etree.fromstring(response_data.encode('utf-8')) # Codifica la respuesta a bytes
+                ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+                get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
 
-            if get_seed_return is None:
-                raise Exception("No se pudo encontrar el nodo getSeedReturn en la respuesta del SII.")
+                if get_seed_return is None:
+                    raise Exception("No se pudo encontrar el nodo getSeedReturn en la respuesta del SII.")
 
-            decoded_response = html.unescape(get_seed_return.text)
-            seed_root = etree.fromstring(decoded_response.encode('utf-8'))
+                decoded_response = html.unescape(get_seed_return.text)
+                seed_root = etree.fromstring(decoded_response.encode('utf-8')) # Codifica la respuesta a bytes
 
-            estado = seed_root.find('.//ESTADO').text
-            if estado != "00":
-                glosa = seed_root.find('.//GLOSA').text or "Sin detalles."
-                raise Exception(f"Error al generar la semilla: {glosa}")
+                estado = seed_root.find('.//ESTADO').text
+                if estado != "00":
+                    glosa = seed_root.find('.//GLOSA').text or "Sin detalles."
+                    raise Exception(f"Error al generar la semilla: {glosa}")
 
-            semilla = seed_root.find('.//SEMILLA').text
-            if not semilla:
-                raise Exception("No se pudo encontrar la semilla en la respuesta del SII.")
+                semilla = seed_root.find('.//SEMILLA').text
+                if not semilla:
+                    raise Exception("No se pudo encontrar la semilla en la respuesta del SII.")
 
-            self.sudo().message_post(
-                body=f"Semilla obtenida correctamente: {semilla}",
-                subject="Semilla Obtenida",
-                message_type='notification',
-            )
+                self.sudo().message_post(
+                    body=f"Semilla obtenida correctamente: {semilla}",
+                    subject="Semilla Obtenida",
+                    message_type='notification',
+                )
 
-            return semilla
+                return semilla
 
-        except Exception as e:
-            _logger.error(f"Error al obtener la semilla desde el SII: {e}")
-            self.sudo().message_post(
-                body=f"Error al obtener la semilla desde el SII: {e}",
-                subject="Error al Obtener Semilla",
-                message_type='notification',
-            )
-            raise UserError(f"Error al obtener la semilla desde el SII: {e}")
-
+            except Exception as e:
+                _logger.error(f"Error al obtener la semilla desde el SII: {e}")
+                self.sudo().message_post(
+                    body=f"Error al obtener la semilla desde el SII: {e}",
+                    subject="Error al Obtener Semilla",
+                    message_type='notification',
+                )
+                raise UserError(f"Error al obtener la semilla desde el SII: {e}")
 
     def _sign_seed(self, seed):
         """
