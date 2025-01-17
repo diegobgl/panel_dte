@@ -6,10 +6,9 @@ from odoo.exceptions import UserError
 import base64
 import xml.etree.ElementTree as ET
 from lxml import etree
-from signxml import XMLSigner, XMLVerifier
+from signxml import XMLSigner, XMLVerifier  # Importar signxml aquí
 import logging
 import html
-
 _logger = logging.getLogger(__name__)
 
 
