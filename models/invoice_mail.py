@@ -308,7 +308,9 @@ class InvoiceMail(models.Model):
    
    
     def _get_token(self, signed_seed):
-        """Solicita el token al SII utilizando la semilla firmada."""
+        """
+        Solicita el token al SII utilizando la semilla firmada.
+        """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         try:
             soap_request = f"""
@@ -321,36 +323,64 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
+
+            # Registrar solicitud en el Chatter y en los logs
+            self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
+            _logger.info(f"XML enviado al SII para obtener token: {soap_request}")
+
+            # Enviar solicitud SOAP
             response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
+
+            # Registrar respuesta en el Chatter y en los logs
+            self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII al solicitar Token")
+            _logger.info(f"Respuesta XML del SII: {response_data}")
+
+            # Procesar respuesta
             response_xml = etree.fromstring(response_data.encode('utf-8'))
             ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
             get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
 
             if not get_token_return or not get_token_return.text:
                 raise UserError("No se encontró el token en la respuesta del SII.")
+
             token_root = etree.fromstring(html.unescape(get_token_return.text))
             token = token_root.find('.//TOKEN')
             if not token or not token.text:
                 raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
+
             _logger.info(f"Token obtenido correctamente: {token.text}")
             return token.text
+
         except Exception as e:
             _logger.error(f"Error al obtener el token: {e}")
             raise UserError(f"Error al obtener el token: {e}")
 
     def _send_soap_request(self, url, soap_body, soap_action_header):
-        """Envía una solicitud SOAP y devuelve la respuesta."""
+        """
+        Envía una solicitud SOAP y registra tanto la solicitud como la respuesta.
+        """
         try:
+            _logger.info(f"Enviando solicitud SOAP a {url}.")
+            _logger.debug(f"SOAP Body enviado: {soap_body}")
+
             http = urllib3.PoolManager()
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': soap_action_header}
+
             response = http.request('POST', url, body=soap_body.encode('utf-8'), headers=headers)
+
             if response.status != 200:
                 raise UserError(f"Error HTTP {response.status} al enviar solicitud a {url}")
-            return response.data.decode('utf-8')
+
+            response_data = response.data.decode('utf-8')
+            _logger.info(f"Respuesta HTTP recibida desde {url}: {response_data}")
+
+            # Registrar respuesta en el Chatter
+            self.sudo().post_xml_to_chatter(response_data, description=f"Respuesta del SII para {soap_action_header}")
+            return response_data
+
         except Exception as e:
             _logger.error(f"Error al enviar solicitud SOAP a {url}: {e}")
             raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
-
 
 
     def _get_seed(self):
@@ -540,14 +570,13 @@ class InvoiceMail(models.Model):
             raise UserError(f"Respuesta del SII no válida: {e}")
 
 
-
-        # DEF POST XML TO CHATTER FUNCIONAL OK
+    # DEF POST XML TO CHATTER FUNCIONAL OK
     def post_xml_to_chatter(self, xml_content, description="XML generado para el SII"):
         """
         Registra el contenido de un XML en el Chatter de Odoo.
         """
         try:
-            # Escapar caracteres especiales para mostrar el XML en formato legible en el chatter
+            # Escapar caracteres especiales para mostrar el XML en formato legible
             escaped_xml = html.escape(xml_content)
 
             # Publicar el mensaje en el Chatter
