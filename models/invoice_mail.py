@@ -385,6 +385,30 @@ class InvoiceMail(models.Model):
             # Obtener el certificado activo
             certificate = self._get_active_certificate()
 
+            # Decodificar el certificado y la clave privada
+            try:
+                private_key_data = base64.b64decode(certificate.signature_key_file)
+                cert_data = base64.b64decode(certificate.signature_cert_file)
+            except Exception as e:
+                _logger.error(f"Error al decodificar los archivos de clave/certificado: {e}")
+                raise UserError("Los datos del certificado o la clave privada no están correctamente codificados en Base64.")
+
+            # Validar el contenido de la clave y el certificado
+            if not private_key_data.startswith(b"-----BEGIN PRIVATE KEY-----"):
+                raise UserError("El archivo de clave privada no tiene el formato PEM esperado.")
+            if not cert_data.startswith(b"-----BEGIN CERTIFICATE-----"):
+                raise UserError("El archivo de certificado no tiene el formato PEM esperado.")
+
+            # Cargar la clave privada
+            private_key = crypto.load_privatekey(
+                crypto.FILETYPE_PEM,
+                private_key_data,
+                passphrase=certificate.signature_pass_phrase.encode() if certificate.signature_pass_phrase else None
+            )
+
+            # Cargar el certificado
+            cert = crypto.load_certificate(crypto.FILETYPE_PEM, cert_data)
+
             # Construir el XML base
             seed_xml = f"""
             <getToken xmlns="http://www.w3.org/2000/09/xmldsig#">
@@ -393,16 +417,6 @@ class InvoiceMail(models.Model):
                 </item>
             </getToken>
             """
-
-            # Cargar la clave privada
-            private_key = crypto.load_privatekey(
-                crypto.FILETYPE_PEM,
-                base64.b64decode(certificate.signature_key_file),
-                passphrase=certificate.signature_pass_phrase.encode() if certificate.signature_pass_phrase else None
-            )
-
-            # Cargar el certificado
-            cert = crypto.load_certificate(crypto.FILETYPE_PEM, base64.b64decode(certificate.signature_cert_file))
 
             # Firmar el XML
             signed_xml = crypto.sign(private_key, seed_xml.encode('utf-8'), 'sha256')
@@ -422,7 +436,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
-
 
 
     def _get_private_key_modulus(self, private_key):
