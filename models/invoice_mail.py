@@ -308,9 +308,12 @@ class InvoiceMail(models.Model):
    
    
     def _get_token(self, signed_seed):
-        """Solicita el token al SII utilizando la semilla firmada."""
+        """
+        Solicita el token al SII utilizando la semilla firmada y registra la solicitud y respuesta en el Chatter y los logs.
+        """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         try:
+            # Crear la solicitud SOAP
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -321,13 +324,19 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
+
+            # Registrar solicitud en el Chatter y en los logs
             self.post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
-            _logger.info(f"XML enviado al SII para obtener token: {soap_request}")
+            _logger.info(f"Solicitud de token enviada al SII: {soap_request}")
 
+            # Enviar la solicitud
             response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
-            self.post_xml_to_chatter(response_data, description="Respuesta del SII al solicitar Token")
-            _logger.info(f"Respuesta XML del SII: {response_data}")
 
+            # Registrar respuesta en el Chatter y en los logs
+            self.post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Token")
+            _logger.info(f"Respuesta recibida del SII para la solicitud de token: {response_data}")
+
+            # Procesar la respuesta
             response_xml = etree.fromstring(response_data.encode('utf-8'))
             ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
             get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
@@ -335,8 +344,11 @@ class InvoiceMail(models.Model):
             if not get_token_return or not get_token_return.text:
                 raise UserError("No se encontró el token en la respuesta del SII.")
 
-            token_root = etree.fromstring(html.unescape(get_token_return.text))
+            # Decodificar y procesar el token
+            decoded_token = html.unescape(get_token_return.text)
+            token_root = etree.fromstring(decoded_token.encode('utf-8'))
             token = token_root.find('.//TOKEN')
+
             if not token or not token.text:
                 raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
 
@@ -345,7 +357,9 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             _logger.error(f"Error al obtener el token: {e}")
+            self.post_xml_to_chatter(f"Error al obtener el token: {str(e)}", description="Error en Solicitud de Token")
             raise UserError(f"Error al obtener el token: {e}")
+
 
     def _send_soap_request(self, url, soap_body, soap_action_header):
         """
@@ -376,9 +390,12 @@ class InvoiceMail(models.Model):
 
 
     def _get_seed(self):
-        """Solicita la semilla desde el SII y la registra en el chatter."""
+        """
+        Solicita la semilla desde el SII y registra la solicitud y respuesta en el Chatter y logs.
+        """
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
         try:
+            # Crear la solicitud SOAP
             soap_request = """
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                 <soapenv:Header/>
@@ -387,30 +404,39 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
-            self.post_xml_to_chatter(soap_request, description="Solicitud de Semilla al SII")
 
+            # Registrar solicitud en el Chatter y en los logs
+            self.post_xml_to_chatter(soap_request, description="Solicitud de Semilla al SII")
+            _logger.info(f"Solicitud de semilla enviada al SII: {soap_request}")
+
+            # Enviar la solicitud
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
+            # Registrar la respuesta en el Chatter y en los logs
+            self.post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Semilla")
+            _logger.info(f"Respuesta recibida del SII para la solicitud de semilla: {response_data}")
+
+            # Procesar la respuesta
             root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
 
             if not get_seed_return or not get_seed_return.text:
-                raise UserError("No se pudo obtener la semilla.")
+                raise UserError("No se encontró la semilla en la respuesta del SII.")
 
             decoded_response = html.unescape(get_seed_return.text)
             seed_root = etree.fromstring(decoded_response.encode('utf-8'))
-            seed = seed_root.find('.//SEMILLA').text
+            seed = seed_root.find('.//SEMILLA')
 
-            if not seed:
-                raise UserError("No se pudo extraer la semilla del XML de respuesta.")
+            if not seed or not seed.text:
+                raise UserError("No se pudo obtener la semilla de la respuesta del SII.")
 
-            _logger.info(f"Semilla obtenida: {seed}")
-            self.post_xml_to_chatter(decoded_response, description="Semilla obtenida del SII")
-            return seed
+            _logger.info(f"Semilla obtenida correctamente: {seed.text}")
+            return seed.text
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
+            self.post_xml_to_chatter(f"Error al obtener la semilla: {str(e)}", description="Error en Solicitud de Semilla")
             raise UserError(f"Error al obtener la semilla: {e}")
 
     def _sign_seed(self, seed):
