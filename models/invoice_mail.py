@@ -9,6 +9,7 @@ from OpenSSL import crypto
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from odoo import models, fields, api
 from odoo.tools import email_split
 from odoo.exceptions import UserError
@@ -387,43 +388,38 @@ class InvoiceMail(models.Model):
         :return: Semilla firmada en formato XML.
         """
         try:
-            # Obtener el certificado activo
             certificate = self._get_active_certificate()
             if not certificate.private_key or not certificate.certificate:
                 raise UserError("El certificado o la clave privada no están configurados correctamente.")
 
-            # Cargar la clave privada
+            # Decodificar la clave privada si está en Base64
+            private_key_data = base64.b64decode(certificate.private_key)
             private_key = load_pem_private_key(
-                certificate.private_key.encode('utf-8'),
+                private_key_data,
                 password=None,
                 backend=default_backend()
             )
 
             # Crear el hash de la semilla
-            digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
-            digest.update(seed.encode('utf-8'))
-            seed_hash = digest.finalize()
+            seed_hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
+            seed_hash.update(seed.encode('utf-8'))
+            seed_digest = seed_hash.finalize()
 
-            # Firmar el hash con la clave privada
+            # Firmar el hash
             signature = private_key.sign(
-                seed_hash,
+                seed_digest,
                 padding.PKCS1v15(),
                 hashes.SHA256()
             )
-
-            # Convertir la firma a Base64
             signature_b64 = base64.b64encode(signature).decode('utf-8')
 
-            # Crear el XML firmado manualmente
+            # Crear el XML firmado
             root = etree.Element("getToken")
             item = etree.SubElement(root, "item")
             etree.SubElement(item, "Semilla").text = seed
-            signature_element = etree.SubElement(item, "Signature")
-            signature_element.text = signature_b64
+            etree.SubElement(item, "Signature").text = signature_b64
 
-            # Convertir el XML firmado a string
             signed_seed = etree.tostring(root, encoding="UTF-8", xml_declaration=True).decode("utf-8")
-
             _logger.info("Semilla firmada correctamente.")
             return signed_seed
 
