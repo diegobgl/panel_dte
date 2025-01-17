@@ -310,7 +310,7 @@ class InvoiceMail(models.Model):
         #get token funcional 
     def _get_token(self, signed_seed):
         """
-        Solicita el token al SII utilizando la semilla firmada y registra XML en el Chatter.
+        Solicita el token al SII utilizando la semilla firmada.
         """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         http = urllib3.PoolManager()
@@ -330,13 +330,16 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
+            # Guardar el XML generado en el campo xml_signed_file
+            self.save_signed_xml(signed_seed)
+
+            # Publicar el XML generado en el Chatter
+            self.post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
+
             headers = {
                 'Content-Type': 'text/xml; charset=utf-8',
                 'SOAPAction': 'urn:getToken'
             }
-
-            # Publicar solicitud en el Chatter
-            self.post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
 
             # Enviar la solicitud al servicio del SII
             response = http.request('POST', token_url, body=soap_request.encode('utf-8'), headers=headers)
@@ -346,11 +349,11 @@ class InvoiceMail(models.Model):
                 _logger.error(f"Error HTTP al solicitar el token: {response.status}")
                 raise UserError(f"Error HTTP al solicitar el token: {response.status}")
 
-            # Parsear el XML de respuesta
+            # Parsear la respuesta SOAP
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta del SII:\n{response_data}")
 
-            # Publicar respuesta en el Chatter
+            # Registrar la respuesta en el Chatter
             self.post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Token")
 
             response_xml = etree.fromstring(response.data)
@@ -375,7 +378,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener el token desde el SII: {e}")
             raise UserError(f"Error al obtener el token desde el SII: {e}")
-
 
     #get seed funcional ok                
     def _get_seed(self):
@@ -622,7 +624,6 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
-
     #def validate xml funcional ok
     def _validate_sii_response(self, response_data):
         try:
@@ -640,14 +641,10 @@ class InvoiceMail(models.Model):
     def post_xml_to_chatter(self, xml_content, description="XML generado para el SII"):
         """
         Registra el contenido de un XML en el Chatter de Odoo.
-
-        Args:
-            xml_content (str): El contenido del XML que deseas registrar.
-            description (str): Descripción que acompañará al XML en el Chatter.
         """
         try:
             # Escapar caracteres especiales para mostrar el XML en formato legible en el chatter
-            escaped_xml = xml_content.replace('<', '&lt;').replace('>', '&gt;')
+            escaped_xml = html.escape(xml_content)
 
             # Publicar el mensaje en el Chatter
             self.message_post(
@@ -694,10 +691,14 @@ class InvoiceMail(models.Model):
 
     def save_signed_xml(self, xml_signed):
         """
-        Guarda el XML firmado en el registro actual.
+        Guarda el XML firmado en el campo `xml_signed_file`.
         """
-        self.xml_signed_file = base64.b64encode(xml_signed.encode('utf-8'))
-        _logger.info("El XML firmado ha sido almacenado correctamente.")
+        try:
+            self.xml_signed_file = base64.b64encode(xml_signed.encode('utf-8'))
+            _logger.info("El XML firmado ha sido almacenado correctamente en el campo `xml_signed_file`.")
+        except Exception as e:
+            _logger.error(f"Error al guardar el XML firmado: {e}")
+            raise UserError(f"Error al guardar el XML firmado: {e}")
 
 
 
