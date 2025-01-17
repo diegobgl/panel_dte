@@ -7,7 +7,7 @@ import base64
 import xml.etree.ElementTree as ET
 import signxml
 from lxml import etree
-from signxml import XMLSigner, XMLVerifier
+from signxml import XMLSigner, XMLVerifier, methods 
 import logging
 import html
 from OpenSSL import crypto
@@ -448,34 +448,36 @@ class InvoiceMail(models.Model):
         Firma la semilla utilizando el certificado configurado y la librería signxml.
         """
         try:
+            # Obtén el certificado activo
             certificate = self._get_active_certificate()
 
-            # Crear XML base con la semilla
+            # Crea el XML base con la semilla
             root = etree.Element("getToken")
             item = etree.SubElement(root, "item")
             etree.SubElement(item, "Semilla").text = seed
 
-            # Usar signxml para firmar
+            # Usar `signxml` para firmar
             signer = XMLSigner(
-                method=signxml.methods.Enveloped,
+                method=methods.enveloped,  # Usa el método correcto desde `signxml.methods`
                 signature_algorithm="rsa-sha1",
-                digest_algorithm='sha1',
-                c14n_algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
+                digest_algorithm="sha1",
+                c14n_algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
             )
             signed_root = signer.sign(
                 root,
                 key=base64.b64decode(certificate.signature_key_file),
                 cert=base64.b64decode(certificate.signature_cert_file),
-                passphrase=certificate.signature_pass_phrase.encode()
+                passphrase=certificate.signature_pass_phrase.encode(),
             )
 
+            # Convierte el XML firmado en string
             signed_seed = etree.tostring(signed_root, encoding="UTF-8").decode("utf-8")
-
             return signed_seed
 
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
+
 
     def _get_private_key_modulus(self, private_key):
         """
