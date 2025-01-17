@@ -388,15 +388,18 @@ class InvoiceMail(models.Model):
         :return: Semilla firmada en formato XML.
         """
         try:
+            # Obtener el certificado activo
             certificate = self._get_active_certificate()
             if not certificate.private_key or not certificate.certificate:
                 raise UserError("El certificado o la clave privada no están configurados correctamente.")
 
             # Decodificar la clave privada si está en Base64
             private_key_data = base64.b64decode(certificate.private_key)
+            
+            # Cargar la clave privada
             private_key = load_pem_private_key(
                 private_key_data,
-                password=None,
+                password=certificate.signature_pass_phrase.encode('utf-8') if certificate.signature_pass_phrase else None,
                 backend=default_backend()
             )
 
