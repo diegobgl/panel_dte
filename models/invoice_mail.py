@@ -1,15 +1,17 @@
 import requests
 import urllib3
+import base64
+import logging
+import html
+import xml.etree.ElementTree as ET
+from lxml import etree
+from OpenSSL import crypto
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
 from odoo import models, fields, api
 from odoo.tools import email_split
 from odoo.exceptions import UserError
-import base64
-import xml.etree.ElementTree as ET
-from lxml import etree
-import logging
-import html
-from OpenSSL import crypto
-from cryptography.hazmat.primitives import serialization
 
 _logger = logging.getLogger(__name__)
 
@@ -379,7 +381,7 @@ class InvoiceMail(models.Model):
 
     def _sign_seed(self, seed):
         """
-        Firma la semilla utilizando el certificado activo configurado en el sistema.
+        Firma la semilla manualmente utilizando cryptography y construye el XML firmado.
 
         :param seed: La semilla proporcionada por el SII.
         :return: Semilla firmada en formato XML.
@@ -390,27 +392,37 @@ class InvoiceMail(models.Model):
             if not certificate.private_key or not certificate.certificate:
                 raise UserError("El certificado o la clave privada no están configurados correctamente.")
 
-            # Crear el XML base con la semilla
+            # Cargar la clave privada
+            private_key = load_pem_private_key(
+                certificate.private_key.encode('utf-8'),
+                password=None,
+                backend=default_backend()
+            )
+
+            # Crear el hash de la semilla
+            digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+            digest.update(seed.encode('utf-8'))
+            seed_hash = digest.finalize()
+
+            # Firmar el hash con la clave privada
+            signature = private_key.sign(
+                seed_hash,
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+
+            # Convertir la firma a Base64
+            signature_b64 = base64.b64encode(signature).decode('utf-8')
+
+            # Crear el XML firmado manualmente
             root = etree.Element("getToken")
             item = etree.SubElement(root, "item")
             etree.SubElement(item, "Semilla").text = seed
-
-            # Configurar el firmador usando SHA256
-            signer = XMLSigner(
-                method=methods.enveloped,  # Firma embebida en el XML
-                signature_algorithm="rsa-sha256",  # Algoritmo de firma
-                digest_algorithm="sha256"  # Algoritmo de hash
-            )
-
-            # Firmar el XML
-            signed_root = signer.sign(
-                root,
-                key=certificate.private_key.encode('utf-8'),  # Clave privada en formato PEM
-                cert=certificate.certificate.encode('utf-8')  # Certificado en formato PEM
-            )
+            signature_element = etree.SubElement(item, "Signature")
+            signature_element.text = signature_b64
 
             # Convertir el XML firmado a string
-            signed_seed = etree.tostring(signed_root, encoding="UTF-8").decode("utf-8")
+            signed_seed = etree.tostring(root, encoding="UTF-8", xml_declaration=True).decode("utf-8")
 
             _logger.info("Semilla firmada correctamente.")
             return signed_seed
@@ -418,7 +430,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al firmar la semilla: {e}")
             raise UserError(f"Error al firmar la semilla: {e}")
-
 
 
 
