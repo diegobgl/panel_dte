@@ -325,29 +325,30 @@ class InvoiceMail(models.Model):
             """
 
             # Registrar solicitud en logs y Chatter
-            _logger.info(f"Solicitud de Token enviada al SII:\n{soap_request}")
+            _logger.info(f"Solicitud de Token enviada:\n{soap_request}")
             self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
 
-            # Enviar solicitud SOAP
+            # Enviar la solicitud
             response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
 
             # Registrar respuesta en logs y Chatter
-            _logger.info(f"Respuesta del SII para Solicitud de Token:\n{response_data}")
+            _logger.info(f"Respuesta del SII:\n{response_data}")
             self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Token")
 
-            # Procesar respuesta
-            response_xml = etree.fromstring(response_data.encode('utf-8'))
+            # Procesar la respuesta
+            response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'ns1': 'https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws'}
-            get_token_return = response_xml.find('.//ns1:getTokenReturn', namespaces=ns)
+            token_element = response_root.find('.//ns1:getTokenReturn', namespaces=ns)
 
-            if not get_token_return or not get_token_return.text:
+            if not token_element or not token_element.text:
                 raise UserError("No se encontró el token en la respuesta del SII.")
 
-            token_root = etree.fromstring(html.unescape(get_token_return.text))
+            decoded_token = html.unescape(token_element.text)
+            token_root = etree.fromstring(decoded_token.encode('utf-8'))
             token = token_root.find('.//TOKEN')
 
             if not token or not token.text:
-                raise UserError("No se pudo encontrar el token en la respuesta decodificada del SII.")
+                raise UserError("No se pudo extraer el token del XML decodificado.")
 
             _logger.info(f"Token obtenido correctamente: {token.text}")
             return token.text
@@ -387,7 +388,7 @@ class InvoiceMail(models.Model):
 
     def _get_seed(self):
         """
-        Solicita la semilla desde el SII y registra la solicitud y respuesta en el Chatter.
+        Solicita la semilla desde el SII y registra tanto la solicitud como la respuesta en el Chatter.
         """
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
         try:
@@ -400,18 +401,18 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            # Registrar solicitud en logs y Chatter
+            # Registrar la solicitud en los logs y el Chatter
             _logger.info(f"Solicitud de semilla enviada al SII:\n{soap_request}")
             self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Semilla al SII")
 
-            # Enviar solicitud
+            # Enviar la solicitud al SII
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            # Registrar respuesta en logs y Chatter
-            _logger.info(f"Respuesta HTTP recibida desde {seed_url}:\n{response_data}")
-            self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para urn:getSeed")
+            # Registrar la respuesta en los logs y el Chatter
+            _logger.info(f"Respuesta del SII para semilla:\n{response_data}")
+            self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Semilla")
 
-            # Procesar respuesta
+            # Procesar la respuesta para extraer la semilla
             root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
@@ -419,11 +420,10 @@ class InvoiceMail(models.Model):
             if not get_seed_return or not get_seed_return.text:
                 raise UserError("No se encontró la semilla en la respuesta del SII.")
 
-            # Des-escape el texto y parsea el XML interno
             decoded_response = html.unescape(get_seed_return.text)
-            _logger.debug(f"XML des-escaped de la semilla:\n{decoded_response}")
+            _logger.debug(f"XML decodificado:\n{decoded_response}")
 
-            # Parsear el contenido interno
+            # Extraer la semilla desde el XML interno
             seed_root = etree.fromstring(decoded_response.encode('utf-8'))
             seed = seed_root.find('.//SEMILLA')
 
@@ -435,7 +435,7 @@ class InvoiceMail(models.Model):
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
-            self.sudo().post_xml_to_chatter(response_data, description="Error en Solicitud de Semilla")
+            self.sudo().post_xml_to_chatter(f"Error al obtener semilla:\n{str(e)}", description="Error en Solicitud de Semilla")
             raise UserError(f"Error al obtener la semilla: {e}")
 
     def _sign_seed(self, seed):
@@ -448,51 +448,37 @@ class InvoiceMail(models.Model):
             if not certificate.signature_key_file or not certificate.signature_pass_phrase:
                 raise UserError("El archivo .pfx o la contraseña no están configurados correctamente.")
 
-            # Cargar y extraer clave privada y certificado desde el archivo .pfx
+            # Procesar el archivo .pfx
             pfx_data = base64.b64decode(certificate.signature_key_file)
             p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
 
-            # Extraer clave privada y certificado en formato PEM
+            # Extraer la clave privada
             private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
-            cert_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
+            private_key = load_pem_private_key(private_key_pem, password=None, backend=default_backend())
 
-            # Cargar la clave privada con cryptography
-            private_key = load_pem_private_key(
-                private_key_pem,
-                password=None,
-                backend=default_backend()
-            )
-
-            # Crear el hash de la semilla
+            # Crear el hash de la semilla y firmarlo
             digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
             digest.update(seed.encode('utf-8'))
             seed_hash = digest.finalize()
 
-            # Firmar el hash con la clave privada
             signature = private_key.sign(
                 seed_hash,
                 padding.PKCS1v15(),
                 hashes.SHA256()
             )
-
-            # Convertir la firma a Base64
             signature_b64 = base64.b64encode(signature).decode('utf-8')
 
-            # Construir el XML firmado
+            # Crear el XML firmado
             root = etree.Element("getToken")
             item = etree.SubElement(root, "item")
             etree.SubElement(item, "Semilla").text = seed
             etree.SubElement(item, "Signature").text = signature_b64
 
             signed_seed = etree.tostring(root, encoding="UTF-8", xml_declaration=True).decode("utf-8")
+            _logger.info(f"XML firmado generado:\n{signed_seed}")
 
-            # Registrar el XML firmado en los logs
-            _logger.info(f"XML firmado generado: {signed_seed}")
-
-            # Registrar en el Chatter
+            # Registrar el XML en el Chatter
             self.sudo().post_xml_to_chatter(signed_seed, description="XML Firmado para el SII")
-
-            _logger.info("Semilla firmada correctamente.")
             return signed_seed
 
         except Exception as e:
