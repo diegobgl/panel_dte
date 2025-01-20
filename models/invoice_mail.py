@@ -400,14 +400,14 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            # Registrar solicitud en los logs y Chatter
+            # Registrar solicitud en logs y Chatter
             _logger.info(f"Solicitud de semilla enviada al SII:\n{soap_request}")
             self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Semilla al SII")
 
             # Enviar solicitud
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            # Registrar respuesta en los logs y Chatter
+            # Registrar respuesta en logs y Chatter
             _logger.info(f"Respuesta HTTP recibida desde {seed_url}:\n{response_data}")
             self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para urn:getSeed")
 
@@ -419,18 +419,23 @@ class InvoiceMail(models.Model):
             if not get_seed_return or not get_seed_return.text:
                 raise UserError("No se encontró la semilla en la respuesta del SII.")
 
+            # Des-escape el texto y parsea el XML interno
             decoded_response = html.unescape(get_seed_return.text)
+            _logger.debug(f"XML des-escaped de la semilla:\n{decoded_response}")
+
+            # Parsear el contenido interno
             seed_root = etree.fromstring(decoded_response.encode('utf-8'))
-            seed = seed_root.find('.//SEMILLA').text
+            seed = seed_root.find('.//SEMILLA')
 
-            if not seed:
-                raise UserError("No se pudo obtener la semilla.")
+            if seed is None or not seed.text:
+                raise UserError("No se pudo extraer la semilla desde la respuesta decodificada.")
 
-            _logger.info(f"Semilla obtenida: {seed}")
-            return seed
+            _logger.info(f"Semilla obtenida correctamente: {seed.text}")
+            return seed.text
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
+            self.sudo().post_xml_to_chatter(response_data, description="Error en Solicitud de Semilla")
             raise UserError(f"Error al obtener la semilla: {e}")
 
     def _sign_seed(self, seed):
