@@ -459,12 +459,11 @@ class InvoiceMail(models.Model):
             semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
             # Validaciones de nodos
-            if estado_node is None:
-                _logger.error("El nodo 'ESTADO' no fue encontrado en el XML decodificado.")
-                raise UserError("El nodo 'ESTADO' no fue encontrado en la respuesta del SII.")
-            
+            if estado_node is None or not estado_node.text:
+                raise UserError("El nodo 'ESTADO' no fue encontrado en el XML decodificado.")
+
             if estado_node.text != "00":
-                raise UserError(f"Error en respuesta del SII: Estado {estado_node.text if estado_node.text else 'Desconocido'}")
+                raise UserError(f"Error en respuesta del SII: Estado {estado_node.text}")
 
             if semilla_node is None or not semilla_node.text:
                 raise UserError("La semilla no fue encontrada en la respuesta del SII.")
