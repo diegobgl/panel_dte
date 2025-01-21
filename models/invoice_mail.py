@@ -392,22 +392,28 @@ class InvoiceMail(models.Model):
             _logger.info(f"Enviando solicitud SOAP a {url}.")
             _logger.debug(f"SOAP Body enviado: {soap_body}")
 
+            # Configuración de la solicitud HTTP
             http = urllib3.PoolManager()
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': soap_action_header}
 
+            # Enviar solicitud
             response = http.request('POST', url, body=soap_body.encode('utf-8'), headers=headers)
 
             if response.status != 200:
                 raise UserError(f"Error HTTP {response.status} al enviar solicitud a {url}")
 
+            # Procesar respuesta
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta HTTP recibida desde {url}: {response_data}")
+
+            # Guardar solicitud y respuesta en xml_signed_file
+            self._store_soap_documents(soap_body, response_data)
+
             return response_data
 
         except Exception as e:
             _logger.error(f"Error al enviar solicitud SOAP a {url}: {e}")
             raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
-
 
     def _get_seed(self):
         """
@@ -671,6 +677,32 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al guardar el XML firmado: {e}")
             raise UserError(f"Error al guardar el XML firmado: {e}")
 
+    def _store_soap_documents(self, request, response):
+        """
+        Guarda la solicitud y la respuesta SOAP como un archivo adjunto en xml_signed_file.
+        """
+        try:
+            # Crear contenido en texto
+            content = f"--- SOAP Request ---\n{request}\n\n--- SOAP Response ---\n{response}"
+
+            # Convertir a binario
+            content_binary = base64.b64encode(content.encode('utf-8'))
+
+            # Guardar en el campo xml_signed_file
+            self.xml_signed_file = content_binary
+            _logger.info("La solicitud y la respuesta SOAP se han guardado en xml_signed_file correctamente.")
+
+            # Registrar en el Chatter
+            self.sudo().message_post(
+                body=f"Solicitud y respuesta SOAP guardadas como archivo adjunto.",
+                subject="SOAP Documentos Registrados",
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
+        except Exception as e:
+            _logger.error(f"Error al guardar solicitud y respuesta SOAP: {e}")
+            raise UserError(f"Error al guardar solicitud y respuesta SOAP: {e}")
 
 
 class InvoiceMailLine(models.Model):
