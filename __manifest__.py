@@ -10,6 +10,9 @@
         'views/invoice_mail_view.xml',
         'views/invoice_mail_report.xml',
         'report/invoice_mail_report_templates.xml',
+        'security/ir.model.access.csv',
+        'security/ir.rule.xml',
+
     ],
     'installable': True,
     'auto_install': False,
