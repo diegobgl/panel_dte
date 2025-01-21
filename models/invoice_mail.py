@@ -447,21 +447,25 @@ class InvoiceMail(models.Model):
             if get_seed_return is None or not get_seed_return.text:
                 raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta del SII.")
 
-            # Decodificar contenido de `getSeedReturn`
-            decoded_response = etree.fromstring(html.unescape(get_seed_return.text).encode('utf-8'))
+            # Desescapar el contenido de `getSeedReturn.text`
+            decoded_response_str = html.unescape(get_seed_return.text)
+            _logger.debug(f"Contenido decodificado de getSeedReturn: {decoded_response_str}")
+
+            # Procesar como XML
+            decoded_response = etree.fromstring(decoded_response_str.encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Extraer el estado y semilla
+            # Extraer el estado y la semilla
             estado_node = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
             semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
-            # Validar estado
             if estado_node is None:
+                _logger.error("El nodo 'ESTADO' no fue encontrado en el XML decodificado.")
                 raise UserError("El nodo 'ESTADO' no fue encontrado en la respuesta del SII.")
+            
             if estado_node.text != "00":
                 raise UserError(f"Error en respuesta del SII: Estado {estado_node.text if estado_node.text else 'Desconocido'}")
 
-            # Validar semilla
             if semilla_node is None or not semilla_node.text:
                 raise UserError("La semilla no fue encontrada en la respuesta del SII.")
 
@@ -472,7 +476,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
             raise UserError(f"Error al obtener la semilla: {e}")
-
 
     def _sign_seed(self, seed):
         """
