@@ -3,6 +3,7 @@ import urllib3
 import base64
 import logging
 import html
+import hashlib  
 import xml.etree.ElementTree as ET
 from lxml import etree
 from OpenSSL import crypto
