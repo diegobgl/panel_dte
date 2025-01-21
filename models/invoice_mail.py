@@ -433,47 +433,39 @@ class InvoiceMail(models.Model):
         </soapenv:Envelope>
         """
         try:
-            # Registrar solicitud
-            _logger.info("Enviando solicitud de semilla al SII.")
-            self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Semilla al SII")
-
-            # Enviar solicitud SOAP
+            # Enviar solicitud al SII
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            # Registrar respuesta
+            # Registrar respuesta en el chatter
             self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Semilla")
 
-            # Procesar respuesta
+            # Procesar el nodo `getSeedReturn`
             response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = response_root.find('.//soapenv:Body//getSeedReturn', namespaces=ns)
 
             if get_seed_return is None or not get_seed_return.text:
-                raise UserError("La respuesta del SII no contiene información válida en 'getSeedReturn'.")
+                raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta del SII.")
 
-            # Decodificar contenido de getSeedReturn
+            # Decodificar contenido de `getSeedReturn`
             decoded_response = etree.fromstring(html.unescape(get_seed_return.text).encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
+            # Extraer la semilla y estado
             estado = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns).text
-            glosa = decoded_response.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=sii_ns).text if decoded_response.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=sii_ns) else ""
             semilla = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns).text
 
-            _logger.info(f"Respuesta del SII: ESTADO={estado}, GLOSA={glosa}, SEMILLA={semilla}")
-
-            # Validar estado
             if estado != "00":
-                raise UserError(f"Error en respuesta del SII: {glosa} (Estado: {estado})")
+                raise UserError(f"Error en respuesta del SII: Estado {estado}")
 
             if not semilla:
-                raise UserError("La respuesta del SII no contiene una semilla válida.")
+                raise UserError("La semilla no fue encontrada en la respuesta del SII.")
 
             _logger.info(f"Semilla obtenida correctamente: {semilla}")
             return semilla
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
-            self.sudo().post_xml_to_chatter(str(e), description="Error en Solicitud de Semilla")
             raise UserError(f"Error al obtener la semilla: {e}")
 
     def _sign_seed(self, seed):
