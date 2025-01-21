@@ -445,11 +445,19 @@ class InvoiceMail(models.Model):
 
             # Procesar respuesta
             response_root = etree.fromstring(response_data.encode('utf-8'))
-            ns = {'SII': 'http://www.sii.cl/XMLSchema'}
+            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+            get_seed_return = response_root.find('.//soapenv:Body//getSeedReturn', namespaces=ns)
 
-            estado = response_root.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=ns).text
-            glosa = response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=ns).text if response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=ns) else ""
-            semilla = response_root.find('.//SII:RESP_BODY/SEED', namespaces=ns).text if response_root.find('.//SII:RESP_BODY/SEED', namespaces=ns) else None
+            if get_seed_return is None or not get_seed_return.text:
+                raise UserError("La respuesta del SII no contiene información válida en 'getSeedReturn'.")
+
+            # Decodificar contenido de getSeedReturn
+            decoded_response = etree.fromstring(html.unescape(get_seed_return.text).encode('utf-8'))
+            sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
+
+            estado = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns).text
+            glosa = decoded_response.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=sii_ns).text if decoded_response.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=sii_ns) else ""
+            semilla = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns).text
 
             _logger.info(f"Respuesta del SII: ESTADO={estado}, GLOSA={glosa}, SEMILLA={semilla}")
 
