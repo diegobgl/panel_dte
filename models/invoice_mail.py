@@ -389,30 +389,36 @@ class InvoiceMail(models.Model):
         Envía una solicitud SOAP al SII y registra tanto la solicitud como la respuesta.
         """
         try:
+            # Registrar la solicitud en el log
             _logger.info(f"Enviando solicitud SOAP a {url}.")
             _logger.debug(f"SOAP Body enviado: {soap_body}")
 
-            # Configuración de la solicitud HTTP
+            # Guardar la solicitud en `xml_signed_file`
+            self.sudo().save_signed_xml(soap_body)
+            self.sudo().post_xml_to_chatter(soap_body, description="Solicitud SOAP al SII")
+
+            # Configurar la conexión
             http = urllib3.PoolManager()
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': soap_action_header}
 
-            # Enviar solicitud
+            # Enviar la solicitud
             response = http.request('POST', url, body=soap_body.encode('utf-8'), headers=headers)
 
+            # Verificar el código de respuesta HTTP
             if response.status != 200:
                 raise UserError(f"Error HTTP {response.status} al enviar solicitud a {url}")
 
-            # Procesar respuesta
+            # Procesar y registrar la respuesta
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta HTTP recibida desde {url}: {response_data}")
-
-            # Guardar solicitud y respuesta en xml_signed_file
-            self._store_soap_documents(soap_body, response_data)
+            self.sudo().save_signed_xml(response_data)
+            self.sudo().post_xml_to_chatter(response_data, description="Respuesta SOAP del SII")
 
             return response_data
 
         except Exception as e:
             _logger.error(f"Error al enviar solicitud SOAP a {url}: {e}")
+            self.sudo().post_xml_to_chatter(str(e), description="Error al enviar Solicitud SOAP")
             raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
 
     def _get_seed(self):
