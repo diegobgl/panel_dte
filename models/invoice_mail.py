@@ -451,14 +451,17 @@ class InvoiceMail(models.Model):
             decoded_response = etree.fromstring(html.unescape(get_seed_return.text).encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Extraer la semilla y estado
+            # Extraer el estado y semilla
             estado_node = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
             semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
-            if estado_node is None or estado_node.text != "00":
-                estado = estado_node.text if estado_node is not None else "Desconocido"
-                raise UserError(f"Error en respuesta del SII: Estado {estado}")
+            # Validar estado
+            if estado_node is None:
+                raise UserError("El nodo 'ESTADO' no fue encontrado en la respuesta del SII.")
+            if estado_node.text != "00":
+                raise UserError(f"Error en respuesta del SII: Estado {estado_node.text if estado_node.text else 'Desconocido'}")
 
+            # Validar semilla
             if semilla_node is None or not semilla_node.text:
                 raise UserError("La semilla no fue encontrada en la respuesta del SII.")
 
