@@ -445,19 +445,27 @@ class InvoiceMail(models.Model):
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = root.find('.//soapenv:Body/getSeedResponse/getSeedReturn', namespaces=ns)
 
-            if not get_seed_return or not get_seed_return.text:
-                raise UserError("No se encontró la semilla en la respuesta del SII.")
+            # Validar el nodo `getSeedReturn`
+            if get_seed_return is None:
+                raise UserError("El nodo 'getSeedReturn' no se encontró en la respuesta del SII.")
 
-            # Decodificar entidades HTML
-            decoded_response = html.unescape(get_seed_return.text)
+            # Decodificar y procesar el contenido del nodo
+            decoded_response = html.unescape(get_seed_return.text or "")
+            if not decoded_response.strip():
+                raise UserError("El contenido del nodo 'getSeedReturn' está vacío o malformado.")
 
             # Procesar el contenido decodificado como XML
-            seed_root = etree.fromstring(decoded_response.encode('utf-8'))
+            try:
+                seed_root = etree.fromstring(decoded_response.encode('utf-8'))
+            except etree.XMLSyntaxError as e:
+                raise UserError(f"Error al analizar el XML decodificado: {e}")
+
+            # Extraer la semilla
             seed = seed_root.find('.//SEMILLA')
+            if seed is None or not seed.text:
+                raise UserError("No se pudo extraer el nodo 'SEMILLA' del XML decodificado.")
 
-            if not seed or not seed.text:
-                raise UserError("No se pudo extraer la semilla del XML decodificado.")
-
+            # Guardar la semilla en logs
             _logger.info(f"Semilla obtenida correctamente: {seed.text}")
             return seed.text
 
