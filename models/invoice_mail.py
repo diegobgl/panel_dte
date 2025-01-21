@@ -447,18 +447,18 @@ class InvoiceMail(models.Model):
             if get_seed_return is None or not get_seed_return.text:
                 raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta del SII.")
 
-            # Desescapar el contenido de `getSeedReturn.text`
+            # Desescapar y procesar como XML
             decoded_response_str = html.unescape(get_seed_return.text)
-            _logger.debug(f"Contenido decodificado de getSeedReturn: {decoded_response_str}")
+            _logger.debug(f"Contenido desescapado: {decoded_response_str}")
 
-            # Procesar como XML
             decoded_response = etree.fromstring(decoded_response_str.encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Extraer el estado y la semilla
+            # Extraer estado y semilla
             estado_node = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
             semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
+            # Validaciones de nodos
             if estado_node is None:
                 _logger.error("El nodo 'ESTADO' no fue encontrado en el XML decodificado.")
                 raise UserError("El nodo 'ESTADO' no fue encontrado en la respuesta del SII.")
