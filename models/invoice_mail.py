@@ -436,7 +436,7 @@ class InvoiceMail(models.Model):
             # Enviar solicitud al SII
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            # Registrar respuesta en el chatter
+            # Registrar respuesta en el Chatter
             self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Semilla")
 
             # Procesar el nodo `getSeedReturn`
@@ -452,15 +452,17 @@ class InvoiceMail(models.Model):
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
             # Extraer la semilla y estado
-            estado = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns).text
-            semilla = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns).text
+            estado_node = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
+            semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
-            if estado != "00":
+            if estado_node is None or estado_node.text != "00":
+                estado = estado_node.text if estado_node is not None else "Desconocido"
                 raise UserError(f"Error en respuesta del SII: Estado {estado}")
 
-            if not semilla:
+            if semilla_node is None or not semilla_node.text:
                 raise UserError("La semilla no fue encontrada en la respuesta del SII.")
 
+            semilla = semilla_node.text
             _logger.info(f"Semilla obtenida correctamente: {semilla}")
             return semilla
 
