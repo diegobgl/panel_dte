@@ -4,7 +4,6 @@
         <record id="rule_invoice_mail_user_own_records" model="ir.rule">
             <field name="name">Ver sus propios registros</field>
             <field name="model_id" ref="model_invoice_mail"/>
-            <field name="groups" eval="[(4, ref('base.group_user'))]"/>
             <field name="perm_read" eval="1"/>
             <field name="perm_write" eval="1"/>
             <field name="perm_create" eval="1"/>
