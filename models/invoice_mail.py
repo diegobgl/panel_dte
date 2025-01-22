@@ -437,30 +437,29 @@ class InvoiceMail(models.Model):
             # Enviar solicitud al SII
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            # Guardar el XML en el campo response_raw
+            # Guardar la respuesta completa en el campo `response_raw`
             self.response_raw = response_data
 
-            # Procesar el nodo `getSeedReturn`
+            # Parsear el XML recibido
             response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = response_root.find('.//soapenv:Body//getSeedReturn', namespaces=ns)
 
             if get_seed_return is None or not get_seed_return.text:
-                _logger.error(f"No se encontró el nodo 'getSeedReturn'. Respuesta: {response_data}")
                 raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta del SII.")
 
-            # Desescapar y procesar como XML
+            # Desescapar y procesar el contenido de `getSeedReturn`
             decoded_response_str = html.unescape(get_seed_return.text)
             _logger.debug(f"Contenido desescapado del XML: {decoded_response_str}")
 
+            # Construir un árbol XML con el contenido desescapado
             decoded_response = etree.fromstring(decoded_response_str.encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Extraer estado y semilla
+            # Extraer el nodo `<ESTADO>` y `<SEMILLA>`
             estado_node = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
             semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
-            # Validaciones de nodos
             if estado_node is None or not estado_node.text:
                 _logger.error(f"Nodo 'ESTADO' no encontrado en el XML decodificado: {decoded_response_str}")
                 raise UserError("El nodo 'ESTADO' no fue encontrado en el XML decodificado.")
