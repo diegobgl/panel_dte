@@ -83,18 +83,20 @@ class InvoiceMail(models.Model):
 
     @api.model
     def message_new(self, msg_dict, custom_values=None):
-        """Procesar correo y extraer datos del XML y PDF adjuntos en un único registro."""
+        """
+        Procesar un correo electrónico recibido, extraer el XML y PDF adjuntos, 
+        crear el registro del documento y manejar los detalles de productos o servicios.
+        """
         custom_values = custom_values or {}
         subject = msg_dict.get('subject', 'Imported Invoice')
-        from_email = email_split(msg_dict.get('from', ''))[0]
         body = msg_dict.get('body', '')
         attachments = msg_dict.get('attachments', [])
 
-        # Variables para almacenar los archivos
+        # Inicializar variables para almacenar los archivos adjuntos
         xml_file = None
         pdf_file = None
 
-        # Procesar archivos adjuntos
+        # Procesar archivos adjuntos del correo
         for attachment in attachments:
             filename = attachment[0]
             file_content = attachment[1]
@@ -107,16 +109,18 @@ class InvoiceMail(models.Model):
         if not xml_file:
             raise UserError("No se encontró un archivo XML válido en el correo.")
 
-        # Procesar el XML y extraer datos relevantes
+        # Procesar el XML para extraer datos relevantes
         try:
             ns = {'sii': 'http://www.sii.cl/SiiDte'}
             root = ET.fromstring(xml_file)
             documento = root.find('.//sii:Documento', ns)
 
             if not documento:
-                raise UserError("No se encontró un documento válido en el XML.")
+                raise UserError("No se encontró un nodo 'Documento' válido en el XML.")
 
             encabezado = documento.find('.//sii:Encabezado', ns)
+            if not encabezado:
+                raise UserError("El nodo 'Encabezado' no está presente en el XML.")
 
             # Extraer datos del encabezado
             tipo_dte = encabezado.find('.//sii:IdDoc/sii:TipoDTE', ns).text
@@ -132,7 +136,7 @@ class InvoiceMail(models.Model):
             rut_receptor = encabezado.find('.//sii:Receptor/sii:RUTRecep', ns).text
             razon_social_receptor = encabezado.find('.//sii:Receptor/sii:RznSocRecep', ns).text
 
-            # Preparar valores para crear el registro
+            # Preparar los valores para el nuevo registro
             custom_values.update({
                 'name': f'DTE {tipo_dte}-{folio}',
                 'company_rut': rut_emisor,
@@ -149,34 +153,47 @@ class InvoiceMail(models.Model):
                 'pdf_preview': base64.b64encode(pdf_file) if pdf_file else False,
             })
         except ET.ParseError as e:
+            _logger.error(f"Error al analizar el XML: {e}")
             raise UserError(f"Error al analizar el XML: {e}")
         except Exception as e:
+            _logger.error(f"Error procesando el XML: {e}")
             raise UserError(f"Error procesando el XML: {e}")
 
-        # Crear el registro
+        # Crear el registro del documento en Odoo
         record = super().message_new(msg_dict, custom_values)
 
-        # Procesar detalles de productos/servicios del XML
+        # Procesar los detalles de productos/servicios
         try:
             detalles = documento.findall('.//sii:Detalle', ns)
+            if not detalles:
+                _logger.warning("No se encontraron detalles en el XML.")
+                raise UserError("El XML no contiene detalles de productos o servicios.")
+
             for detalle in detalles:
-                nombre_item = detalle.find('.//sii:NmbItem', ns).text
-                cantidad_item = detalle.find('.//sii:QtyItem', ns).text
-                precio_item = detalle.find('.//sii:PrcItem', ns).text
+                nombre_item = detalle.find('.//sii:NmbItem', ns)
+                cantidad_item = detalle.find('.//sii:QtyItem', ns)
+                precio_item = detalle.find('.//sii:PrcItem', ns)
                 descripcion_item = detalle.find('.//sii:DscItem', ns)
+
+                # Validar que los nodos existan antes de procesar
+                if nombre_item is None or cantidad_item is None or precio_item is None:
+                    raise UserError("El XML contiene detalles de productos incompletos.")
+
                 descripcion_texto = descripcion_item.text if descripcion_item is not None else ''
 
+                # Crear las líneas de productos
                 self.env['invoice.mail.line'].create({
                     'invoice_id': record.id,
-                    'product_name': nombre_item,
-                    'quantity': float(cantidad_item),
-                    'price_unit': float(precio_item),
-                    'description': descripcion_texto,  # Asigna la descripción
+                    'product_name': nombre_item.text,
+                    'quantity': float(cantidad_item.text),
+                    'price_unit': float(precio_item.text),
+                    'description': descripcion_texto,
                 })
         except Exception as e:
+            _logger.error(f"Error al procesar los detalles del XML: {e}")
             raise UserError(f"Error al procesar los detalles del XML: {e}")
 
-        # Registrar el contenido del correo en el chatter
+        # Publicar el contenido del correo en el Chatter
         record.sudo().message_post(
             body=body or "Sin contenido en el cuerpo del correo.",
             subject=subject,
@@ -185,7 +202,7 @@ class InvoiceMail(models.Model):
         )
 
         return record
-    
+        
 
     @api.depends('xml_file')
     def _compute_attachments_count(self):
@@ -319,7 +336,7 @@ class InvoiceMail(models.Model):
             # Realizar la solicitud SOAP
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            # Guardar la respuesta en el campo del modelo para depuración
+            # Guardar la respuesta cruda
             self.response_raw = response_data
 
             # Parsear la respuesta SOAP
@@ -332,14 +349,13 @@ class InvoiceMail(models.Model):
 
             # Desescapar y validar contenido del XML de la semilla
             unescaped_content = html.unescape(get_seed_return.text)
-
-            # Debugging adicional para validar el XML desescapado
             _logger.debug(f"Contenido XML desescapado: {unescaped_content}")
 
             # Parsear el XML desescapado
             try:
                 decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
             except etree.XMLSyntaxError as e:
+                _logger.error(f"Error al parsear el XML desescapado: {e}")
                 raise UserError(f"Error al parsear el XML desescapado: {e}")
 
             # Definir el namespace de SII
