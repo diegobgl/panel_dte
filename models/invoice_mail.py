@@ -318,10 +318,10 @@ class InvoiceMail(models.Model):
         try:
             # Realizar la solicitud SOAP
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
-            
-            # Guardar la respuesta en el campo del modelo
+
+            # Guardar la respuesta en el campo del modelo para depuración
             self.response_raw = response_data
-            
+
             # Parsear la respuesta SOAP
             response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
@@ -332,13 +332,15 @@ class InvoiceMail(models.Model):
 
             # Desescapar el contenido XML dentro de <getSeedReturn>
             unescaped_content = html.unescape(get_seed_return.text)
+
+            # Parsear el XML desescapado
             decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
 
             # Definir el namespace de SII
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Buscar el nodo SEMILLA
-            seed_node = decoded_response.find('.//SII:SEMILLA', namespaces=sii_ns)
+            # Buscar el nodo SEMILLA dentro del XML desescapado
+            seed_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
             if seed_node is None or not seed_node.text:
                 raise UserError("No se encontró el nodo 'SEMILLA' en el XML procesado.")
 
@@ -441,12 +443,6 @@ class InvoiceMail(models.Model):
 
 
 
-    # def _get_private_key_modulus(self, private_key):
-    #     """
-    #     Obtiene el módulo de la clave privada en formato Base64.
-    #     """
-    #     numbers = private_key.private_numbers()
-    #     return base64.b64encode(numbers.public_numbers.n.to_bytes((numbers.public_numbers.n.bit_length() + 7) // 8, byteorder='big')).decode('utf-8')
 
     def check_sii_status(self):
         """
