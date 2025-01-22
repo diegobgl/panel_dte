@@ -59,6 +59,8 @@ class InvoiceMail(models.Model):
         'invoice_mail_id', 
         string="References"
     )
+    response_raw = fields.Text(string="Respuesta XML Cruda")
+
 
 
 
@@ -414,19 +416,19 @@ class InvoiceMail(models.Model):
     # -------------------------------------------------------------------------
 
 
+    @api.model
     def _send_soap_request(self, url, soap_body, soap_action_header=''):
-        """
-        Envía una solicitud SOAP al SII y registra request/response.
-        """
+        """ Envía una solicitud SOAP al SII y registra request/response. """
         _logger.info(f"Enviando solicitud SOAP a {url}.")
-        _logger.debug(f"SOAP Body:\n{soap_body}")
-
-        # Publicar en Chatter la request si quieres:
-        # self.post_xml_to_chatter(soap_body, description=f"SOAP Request to {url}")
+        
+        # 1) PUBLICAR REQUEST EN CHATTER
+        self.post_xml_to_chatter(soap_body, description=f"SOAP Request to {url}")
+        # 2) GUARDAR REQUEST EN ADJUNTO
+        self._store_soap_documents("soap_request", soap_body)
 
         headers = {
             'Content-Type': 'text/xml; charset=utf-8',
-            'SOAPAction': soap_action_header
+            'SOAPAction': soap_action_header,
         }
         try:
             response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, timeout=30)
@@ -434,8 +436,10 @@ class InvoiceMail(models.Model):
                 _logger.error(f"Error HTTP {response.status_code}: {response.text}")
                 raise UserError(f"Error SOAP. Código HTTP: {response.status_code}")
 
-            # Publicar en Chatter la response si quieres:
-            # self.post_xml_to_chatter(response.text, description=f"SOAP Response from {url}")
+            # 3) PUBLICAR RESPONSE EN CHATTER
+            self.post_xml_to_chatter(response.text, description=f"SOAP Response from {url}")
+            # 4) GUARDAR RESPONSE EN ADJUNTO
+            self._store_soap_documents("soap_response", response.text)
 
             return response.text
 
@@ -461,9 +465,9 @@ class InvoiceMail(models.Model):
 
     def post_xml_to_chatter(self, xml_content, description="XML generado"):
         """
-        Registra cualquier contenido (SOAP, XML, etc.) en el Chatter.
+        Registra el contenido en el Chatter (como texto con <pre>).
         """
-        escaped_xml = html.escape(xml_content)
+        escaped_xml = html.escape(xml_content or "")
         self.message_post(
             body=f"<b>{description}</b><br/><pre style='white-space: pre-wrap;'>{escaped_xml}</pre>",
             subject=description,
@@ -471,16 +475,15 @@ class InvoiceMail(models.Model):
             subtype_xmlid='mail.mt_note',
         )
 
+
     def _store_soap_documents(self, tag_name, content):
         """
-        Guarda el contenido en el campo `xml_signed_file` como adjunto base64,
-        por si lo quieres descargar luego.
+        Guarda 'content' en el campo xml_signed_file como un adjunto base64.
         """
         try:
-            txt = f"--- {tag_name} ---\n{content}"
+            txt = f"--- {tag_name.upper()} ---\n{content}"
             content_binary = base64.b64encode(txt.encode('utf-8'))
             self.xml_signed_file = content_binary
-
             self.message_post(
                 body=f"{tag_name} guardado en xml_signed_file",
                 subject="Registro SOAP",
@@ -490,6 +493,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al guardar {tag_name}: {e}")
             raise UserError(f"Error al guardar {tag_name}: {e}")
+
 
     # get dte claim funcional ok
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
