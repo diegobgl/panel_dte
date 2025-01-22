@@ -36,7 +36,6 @@ class InvoiceMail(models.Model):
     amount_total = fields.Float(string='Monto Total')
     xml_file = fields.Binary(string='Archivo XML', attachment=True)
     pdf_preview = fields.Binary(string='Previsualización PDF', attachment=True)
-    xml_signed_file = fields.Binary(string='XML File (Signed/Requests)', attachment=True)
     response_raw = fields.Text(string="Respuesta XML Cruda")
     folio_number = fields.Char(string='Folio Number')
     document_type = fields.Many2one('l10n_latam.document.type', string='Document Type')
@@ -47,6 +46,7 @@ class InvoiceMail(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
+    xml_signed_file = fields.Binary(string='XML File (Signed/Requests)', attachment=True)
 
 
 
