@@ -422,7 +422,7 @@ class InvoiceMail(models.Model):
 
     def _get_seed(self):
         """
-        Solicita una semilla al SII y registra la solicitud y respuesta en el campo response_raw.
+        Solicita una semilla al SII y la extrae de la respuesta, ignorando otros nodos.
         """
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
         soap_request = """
@@ -434,7 +434,7 @@ class InvoiceMail(models.Model):
         </soapenv:Envelope>
         """
         try:
-            # Enviar solicitud al SII
+            # Enviar la solicitud al SII
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
             # Guardar la respuesta completa en el campo `response_raw`
@@ -456,19 +456,12 @@ class InvoiceMail(models.Model):
             decoded_response = etree.fromstring(decoded_response_str.encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Extraer el nodo `<ESTADO>` y `<SEMILLA>`
-            estado_node = decoded_response.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
+            # Extraer únicamente el nodo `<SEMILLA>`
             semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
-            if estado_node is None or not estado_node.text:
-                _logger.error(f"Nodo 'ESTADO' no encontrado en el XML decodificado: {decoded_response_str}")
-                raise UserError("El nodo 'ESTADO' no fue encontrado en el XML decodificado.")
-
-            if estado_node.text != "00":
-                raise UserError(f"Error en respuesta del SII: Estado {estado_node.text}")
-
             if semilla_node is None or not semilla_node.text:
-                raise UserError("La semilla no fue encontrada en la respuesta del SII.")
+                _logger.error(f"Nodo 'SEMILLA' no encontrado en el XML decodificado: {decoded_response_str}")
+                raise UserError("El nodo 'SEMILLA' no fue encontrado en el XML decodificado.")
 
             semilla = semilla_node.text
             _logger.info(f"Semilla obtenida correctamente: {semilla}")
