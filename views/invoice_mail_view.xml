@@ -92,7 +92,7 @@
                             </field>
                         </page>
                         <page string="XML enviado">
-                            <field name="response_raw" widget="textarea"/>
+                            <field name="xml_signed_file" filename="name"/>
                         </page>
                     </notebook>
                 </sheet>
