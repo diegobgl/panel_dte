@@ -323,30 +323,29 @@ class InvoiceMail(models.Model):
         </soapenv:Envelope>
         """
         try:
-            # Realizar solicitud
+            # Realizar la solicitud SOAP
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
-            self.response_raw = response_data  # Guardar respuesta cruda
-
-            # Parsear y desescapar nodo getSeedReturn
+            self.response_raw = response_data  # Guardar la respuesta cruda
+            
+            # Parsear la respuesta SOAP para obtener el nodo getSeedReturn
             response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
-            get_seed_return = response_root.find('.//soapenv:Body//getSeedReturn', namespaces=ns)
+            get_seed_return = response_root.find('.//soapenv:Body//getSeedResponse//getSeedReturn', namespaces=ns)
 
             if get_seed_return is None or not get_seed_return.text:
                 raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta.")
 
-            # Construir árbol XML desde contenido desescapado
+            # Desescapar el contenido del XML
             decoded_response_str = html.unescape(get_seed_return.text)
             decoded_response = etree.fromstring(decoded_response_str.encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Buscar nodo SEMILLA
-            semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
-
-            if semilla_node is None or not semilla_node.text:
+            # Buscar el nodo SEMILLA
+            seed_node = decoded_response.find('.//SII:SEMILLA', namespaces=sii_ns)
+            if seed_node is None or not seed_node.text:
                 raise UserError("No se encontró el nodo 'SEMILLA' en el XML decodificado.")
 
-            return semilla_node.text
+            return seed_node.text
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
