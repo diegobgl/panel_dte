@@ -47,6 +47,11 @@ class InvoiceMail(models.Model):
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
     xml_signed_file = fields.Binary(string='XML File (Signed/Requests)', attachment=True)
+    line_ids = fields.One2many(
+        'invoice.mail.line',
+        'invoice_id',
+        string='Detalle de Productos'
+    )
 
 
 
