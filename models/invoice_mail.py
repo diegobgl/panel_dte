@@ -391,9 +391,8 @@ class InvoiceMail(models.Model):
             _logger.info(f"Enviando solicitud SOAP a {url}.")
             _logger.debug(f"SOAP Body enviado: {soap_body}")
 
-            # Guardar la solicitud en `xml_signed_file`
-            self.sudo().save_signed_xml(soap_body)
-            self.sudo().post_xml_to_chatter(soap_body, description="Solicitud SOAP al SII")
+            # Guardar la solicitud en el campo `response_raw`
+            self.response_raw = f"--- SOAP Request ---\n{soap_body}"
 
             # Configurar la conexión
             http = urllib3.PoolManager()
@@ -409,7 +408,9 @@ class InvoiceMail(models.Model):
             # Procesar y registrar la respuesta
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta HTTP recibida desde {url}: {response_data}")
-            self.sudo().save_signed_xml(response_data)
+
+            # Guardar tanto la solicitud como la respuesta en `response_raw`
+            self.response_raw += f"\n\n--- SOAP Response ---\n{response_data}"
             self.sudo().post_xml_to_chatter(response_data, description="Respuesta SOAP del SII")
 
             return response_data
@@ -421,7 +422,7 @@ class InvoiceMail(models.Model):
 
     def _get_seed(self):
         """
-        Solicita una semilla al SII y registra la solicitud y respuesta en el Chatter.
+        Solicita una semilla al SII y registra la solicitud y respuesta en el campo response_raw.
         """
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
         soap_request = """
@@ -436,11 +437,8 @@ class InvoiceMail(models.Model):
             # Enviar solicitud al SII
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
 
-            # **Guardar el XML en el campo de texto**
+            # Guardar el XML en el campo response_raw
             self.response_raw = response_data
-
-            # Registrar respuesta en el Chatter
-            self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Semilla")
 
             # Procesar el nodo `getSeedReturn`
             response_root = etree.fromstring(response_data.encode('utf-8'))
