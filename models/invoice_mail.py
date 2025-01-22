@@ -52,6 +52,11 @@ class InvoiceMail(models.Model):
         'invoice_id',
         string='Detalle de Productos'
     )
+    l10n_cl_reference_ids = fields.One2many(
+        'invoice.mail.reference', 
+        'invoice_mail_id', 
+        string="References"
+    )
 
 
 
