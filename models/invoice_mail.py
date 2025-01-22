@@ -325,9 +325,9 @@ class InvoiceMail(models.Model):
         try:
             # Realizar la solicitud SOAP
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
-            self.response_raw = response_data  # Guardar la respuesta cruda
-            
-            # Parsear la respuesta SOAP para obtener el nodo getSeedReturn
+            self.response_raw = response_data  # Guardar la respuesta cruda para referencia
+
+            # Parsear la respuesta SOAP
             response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = response_root.find('.//soapenv:Body//getSeedResponse//getSeedReturn', namespaces=ns)
@@ -335,15 +335,14 @@ class InvoiceMail(models.Model):
             if get_seed_return is None or not get_seed_return.text:
                 raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta.")
 
-            # Desescapar el contenido del XML
-            decoded_response_str = html.unescape(get_seed_return.text)
-            decoded_response = etree.fromstring(decoded_response_str.encode('utf-8'))
+            # Procesar el contenido escapado directamente como XML
+            decoded_response = etree.fromstring(get_seed_return.text.encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
             # Buscar el nodo SEMILLA
             seed_node = decoded_response.find('.//SII:SEMILLA', namespaces=sii_ns)
             if seed_node is None or not seed_node.text:
-                raise UserError("No se encontró el nodo 'SEMILLA' en el XML decodificado.")
+                raise UserError("No se encontró el nodo 'SEMILLA' en el XML procesado.")
 
             return seed_node.text
 
