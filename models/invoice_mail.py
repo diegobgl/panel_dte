@@ -261,118 +261,132 @@ class InvoiceMail(models.Model):
 
     def _sign_seed(self, seed):
         """
-        Firma la semilla utilizando el certificado configurado y devuelve el XML firmado.
+        Firma la semilla utilizando el certificado configurado y devuelve el XML firmado
+        en el formato que exige el SII (sin prefijo ds: y sin <?xml ...> dentro de <getToken>).
         """
-        # Obtener certificado
-        certificate = self._get_active_certificate()
-        if not certificate.signature_key_file or not certificate.signature_pass_phrase:
-            raise UserError("El certificado configurado no es válido o falta la contraseña.")
+        try:
+            # 1) Obtener el certificado activo (PKCS12)
+            certificate = self._get_active_certificate()
+            if not certificate.signature_key_file or not certificate.signature_pass_phrase:
+                raise UserError("El certificado configurado no es válido o falta la contraseña.")
 
-        # Decodificar PKCS12
-        pfx_data = base64.b64decode(certificate.signature_key_file)
-        p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
+            pfx_data = base64.b64decode(certificate.signature_key_file)
+            p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
 
-        # Extraer claves
-        private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
-        private_key = load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-        public_cert = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
-        x509_cert_b64 = base64.b64encode(public_cert).decode('utf-8')
+            # 2) Extraer clave privada y certificado público
+            private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
+            private_key = load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+            public_cert = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
+            x509_cert_b64 = base64.b64encode(public_cert).decode('utf-8')
 
-        # Crear SignedInfo
-        nsmap = {"ds": "http://www.w3.org/2000/09/xmldsig#"}
-        signed_info = etree.Element("{http://www.w3.org/2000/09/xmldsig#}SignedInfo", nsmap=nsmap)
-        etree.SubElement(
-            signed_info,
-            "{http://www.w3.org/2000/09/xmldsig#}CanonicalizationMethod",
-            Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
-        )
-        etree.SubElement(
-            signed_info,
-            "{http://www.w3.org/2000/09/xmldsig#}SignatureMethod",
-            Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"
-        )
-        reference = etree.SubElement(
-            signed_info,
-            "{http://www.w3.org/2000/09/xmldsig#}Reference",
-            URI=""
-        )
-        transforms = etree.SubElement(reference, "{http://www.w3.org/2000/09/xmldsig#}Transforms")
-        etree.SubElement(
-            transforms,
-            "{http://www.w3.org/2000/09/xmldsig#}Transform",
-            Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"
-        )
-        etree.SubElement(
-            reference,
-            "{http://www.w3.org/2000/09/xmldsig#}DigestMethod",
-            Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"
-        )
+            # 3) Crear estructura XML <getToken> ... <Signature> ... según exige SII
+            #    a) Nodo raiz <getToken>
+            get_token = etree.Element("getToken")
 
-        # DigestValue
-        digest = hashlib.sha1(seed.encode('utf-8')).digest()
-        digest_value = base64.b64encode(digest).decode('utf-8')
-        etree.SubElement(reference, "{http://www.w3.org/2000/09/xmldsig#}DigestValue").text = digest_value
+            #    b) <item><Semilla>...</Semilla></item>
+            item = etree.SubElement(get_token, "item")
+            etree.SubElement(item, "Semilla").text = seed
 
-        # Firmar
-        signed_info_c14n = etree.tostring(signed_info, method="c14n", exclusive=True, with_comments=False)
-        signature = private_key.sign(
-            signed_info_c14n,
-            padding.PKCS1v15(),
-            hashes.SHA1()
-        )
-        signature_value = base64.b64encode(signature).decode('utf-8')
+            #    c) <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+            #       Esto define un namespace por DEFECTO (sin prefijo)
+            signature_node = etree.Element("Signature", nsmap={None: "http://www.w3.org/2000/09/xmldsig#"})
 
-        # KeyInfo
-        key_info = etree.Element("{http://www.w3.org/2000/09/xmldsig#}KeyInfo", nsmap=nsmap)
-        key_value = etree.SubElement(key_info, "{http://www.w3.org/2000/09/xmldsig#}KeyValue")
-        rsa_key_value = etree.SubElement(key_value, "{http://www.w3.org/2000/09/xmldsig#}RSAKeyValue")
-
-        # Modulus
-        modulus = base64.b64encode(
-            private_key.private_numbers().public_numbers.n.to_bytes(
-                (private_key.private_numbers().public_numbers.n.bit_length() + 7) // 8,
-                byteorder="big"
+            # 4) Crear el bloque <SignedInfo>
+            signed_info = etree.SubElement(signature_node, "SignedInfo")
+            etree.SubElement(
+                signed_info,
+                "CanonicalizationMethod",
+                Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
             )
-        ).decode('utf-8')
-        # Exponent
-        exponent = base64.b64encode(
-            private_key.private_numbers().public_numbers.e.to_bytes(
-                (private_key.private_numbers().public_numbers.e.bit_length() + 7) // 8,
-                byteorder="big"
+            etree.SubElement(
+                signed_info,
+                "SignatureMethod",
+                Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"
             )
-        ).decode('utf-8')
+            reference = etree.SubElement(signed_info, "Reference", URI="")
+            transforms = etree.SubElement(reference, "Transforms")
+            etree.SubElement(
+                transforms,
+                "Transform",
+                Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"
+            )
+            etree.SubElement(
+                reference,
+                "DigestMethod",
+                Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"
+            )
 
-        etree.SubElement(rsa_key_value, "{http://www.w3.org/2000/09/xmldsig#}Modulus").text = modulus
-        etree.SubElement(rsa_key_value, "{http://www.w3.org/2000/09/xmldsig#}Exponent").text = exponent
+            # 5) Calcular y agregar <DigestValue> según la semilla
+            digest = hashlib.sha1(seed.encode('utf-8')).digest()
+            digest_value = base64.b64encode(digest).decode('utf-8')
+            etree.SubElement(reference, "DigestValue").text = digest_value
 
-        x509_data = etree.SubElement(key_info, "{http://www.w3.org/2000/09/xmldsig#}X509Data")
-        etree.SubElement(x509_data, "{http://www.w3.org/2000/09/xmldsig#}X509Certificate").text = x509_cert_b64
+            # 6) Firmar el bloque SignedInfo con la clave privada
+            signed_info_c14n = etree.tostring(
+                signed_info,
+                method="c14n",     # canonical XML
+                exclusive=True,
+                with_comments=False
+            )
+            signature = private_key.sign(
+                signed_info_c14n,
+                padding.PKCS1v15(),
+                hashes.SHA1()
+            )
+            signature_value = base64.b64encode(signature).decode('utf-8')
 
-        # Construir Signature
-        signature_node = etree.Element("{http://www.w3.org/2000/09/xmldsig#}Signature", nsmap=nsmap)
-        signature_node.append(signed_info)
-        etree.SubElement(signature_node, "{http://www.w3.org/2000/09/xmldsig#}SignatureValue").text = signature_value
-        signature_node.append(key_info)
+            # 7) Crear el nodo <SignatureValue> y asignar la firma
+            etree.SubElement(signature_node, "SignatureValue").text = signature_value
 
-        # Envolver en getToken -> item -> Semilla
-        get_token = etree.Element("getToken")
-        item = etree.SubElement(get_token, "item")
-        etree.SubElement(item, "Semilla").text = seed
-        get_token.append(signature_node)
+            # 8) Crear <KeyInfo><KeyValue><RSAKeyValue> ... <Exponent> ... <X509Data>...
+            key_info = etree.SubElement(signature_node, "KeyInfo")
+            key_value = etree.SubElement(key_info, "KeyValue")
+            rsa_key_value = etree.SubElement(key_value, "RSAKeyValue")
 
-        # XML final firmado
-        signed_xml = etree.tostring(
-            get_token, pretty_print=True, xml_declaration=True, encoding="UTF-8"
-        ).decode('utf-8')
+            #    a) Modulus
+            modulus = base64.b64encode(
+                private_key.private_numbers().public_numbers.n.to_bytes(
+                    (private_key.private_numbers().public_numbers.n.bit_length() + 7) // 8,
+                    byteorder="big"
+                )
+            ).decode('utf-8')
+            etree.SubElement(rsa_key_value, "Modulus").text = modulus
 
-        # También puedes guardarlo en self.xml_signed_file si gustas:
-        # self._store_soap_documents("Signed Seed", signed_xml)
+            #    b) Exponent
+            exponent = base64.b64encode(
+                private_key.private_numbers().public_numbers.e.to_bytes(
+                    (private_key.private_numbers().public_numbers.e.bit_length() + 7) // 8,
+                    byteorder="big"
+                )
+            ).decode('utf-8')
+            etree.SubElement(rsa_key_value, "Exponent").text = exponent
 
-        _logger.info("Semilla firmada correctamente.")
-        return signed_xml
+            #    c) <X509Data><X509Certificate>...
+            x509_data = etree.SubElement(key_info, "X509Data")
+            etree.SubElement(x509_data, "X509Certificate").text = x509_cert_b64
+
+            # 9) Insertar <Signature> dentro de <getToken>
+            get_token.append(signature_node)
+
+            # 10) Convertir a cadena (sin <?xml ...>):
+            #     - pretty_print=True para que se vea ordenado
+            #     - xml_declaration=False para NO meter "<?xml version="..."?>"
+            signed_xml = etree.tostring(
+                get_token,
+                pretty_print=True,
+                encoding="UTF-8",
+                xml_declaration=False  # <--- IMPORTANTE
+            ).decode('utf-8')
+
+            _logger.info("Semilla firmada correctamente (sin prefijo ds:).")
+            return signed_xml
+
+        except Exception as e:
+            _logger.error(f"Error al firmar la semilla: {e}")
+            raise UserError(f"Error al firmar la semilla: {e}")
 
 
-    
+        
 
         #get token funcional 
    
