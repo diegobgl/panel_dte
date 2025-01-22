@@ -279,14 +279,7 @@ class InvoiceMail(models.Model):
         Envía una solicitud SOAP al SII y registra tanto la solicitud como la respuesta.
         """
         try:
-            # Registrar la solicitud en el log
             _logger.info(f"Enviando solicitud SOAP a {url}.")
-            _logger.debug(f"SOAP Body enviado: {soap_body}")
-
-            # Guardar la solicitud en el campo `response_raw`
-            self.response_raw = f"--- SOAP Request ---\n{soap_body}"
-
-            # Configurar la conexión
             http = urllib3.PoolManager()
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': soap_action_header}
 
@@ -297,19 +290,16 @@ class InvoiceMail(models.Model):
             if response.status != 200:
                 raise UserError(f"Error HTTP {response.status} al enviar solicitud a {url}")
 
-            # Procesar y registrar la respuesta
+            # Procesar la respuesta
             response_data = response.data.decode('utf-8')
             _logger.info(f"Respuesta HTTP recibida desde {url}: {response_data}")
 
-            # Guardar tanto la solicitud como la respuesta en `response_raw`
-            self.response_raw += f"\n\n--- SOAP Response ---\n{response_data}"
-            self.sudo().post_xml_to_chatter(response_data, description="Respuesta SOAP del SII")
-
+            # Guardar la respuesta en el modelo
+            self.response_raw = response_data
             return response_data
 
         except Exception as e:
             _logger.error(f"Error al enviar solicitud SOAP a {url}: {e}")
-            self.sudo().post_xml_to_chatter(str(e), description="Error al enviar Solicitud SOAP")
             raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
 
     def _get_seed(self):
@@ -356,8 +346,11 @@ class InvoiceMail(models.Model):
             if get_seed_return is None or not get_seed_return.text:
                 raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta.")
 
-            # Procesar el contenido escapado directamente como XML
-            decoded_response = etree.fromstring(get_seed_return.text.encode('utf-8'))
+            # Desescapar el contenido XML dentro de <getSeedReturn>
+            unescaped_content = html.unescape(get_seed_return.text)
+            decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
+
+            # Definir el namespace de SII
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
             # Buscar el nodo SEMILLA
