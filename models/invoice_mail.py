@@ -313,6 +313,9 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
 
     def _get_seed(self):
+        """
+        Obtiene una semilla desde el servicio CrSeed.jws.
+        """
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
         soap_request = """
         <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
@@ -325,10 +328,28 @@ class InvoiceMail(models.Model):
         try:
             # Realizar la solicitud SOAP
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
-            self.response_raw = response_data  # Guardar la respuesta cruda para referencia
+            
+            # Guardar la respuesta en el campo del modelo
+            self.response_raw = response_data
+            
+            # Procesar la respuesta para obtener la semilla
+            return self._process_seed_response()
+
+        except Exception as e:
+            _logger.error(f"Error al obtener la semilla: {e}")
+            raise UserError(f"Error al obtener la semilla: {e}")
+
+    def _process_seed_response(self):
+        """
+        Procesa la respuesta almacenada en `response_raw` para extraer la semilla.
+        """
+        try:
+            # Verificar que la respuesta esté definida
+            if not self.response_raw:
+                raise UserError("No hay datos de respuesta para procesar.")
 
             # Parsear la respuesta SOAP
-            response_root = etree.fromstring(response_data.encode('utf-8'))
+            response_root = etree.fromstring(self.response_raw.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = response_root.find('.//soapenv:Body//getSeedResponse//getSeedReturn', namespaces=ns)
 
@@ -347,8 +368,8 @@ class InvoiceMail(models.Model):
             return seed_node.text
 
         except Exception as e:
-            _logger.error(f"Error al obtener la semilla: {e}")
-            raise UserError(f"Error al obtener la semilla: {e}")
+            _logger.error(f"Error al procesar la respuesta de semilla: {e}")
+            raise UserError(f"Error al procesar la respuesta de semilla: {e}")
 
 
     def _sign_seed(self, seed):
