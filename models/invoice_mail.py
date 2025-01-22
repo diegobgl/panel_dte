@@ -56,7 +56,7 @@ class InvoiceMail(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
-    xml_signed_file = fields.Binary(string="Archivo XML Firmado", attachment=True)
+    response_raw = fields.Text(string="Respuesta XML Cruda", help="Almacena la respuesta XML cruda del SII para su análisis.")
 
 
 
@@ -435,6 +435,9 @@ class InvoiceMail(models.Model):
         try:
             # Enviar solicitud al SII
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
+
+            # **Guardar el XML en el campo de texto**
+            self.response_raw = response_data
 
             # Registrar respuesta en el Chatter
             self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Semilla")
