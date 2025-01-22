@@ -418,12 +418,11 @@ class InvoiceMail(models.Model):
 
     @api.model
     def _send_soap_request(self, url, soap_body, soap_action_header=''):
-        """ Envía una solicitud SOAP al SII y registra request/response. """
         _logger.info(f"Enviando solicitud SOAP a {url}.")
-        
-        # 1) PUBLICAR REQUEST EN CHATTER
+        # --> Si quieres ver en el log la request completa:
+        _logger.info(f"SOAP Request Body:\n{soap_body}")
+
         self.post_xml_to_chatter(soap_body, description=f"SOAP Request to {url}")
-        # 2) GUARDAR REQUEST EN ADJUNTO
         self._store_soap_documents("soap_request", soap_body)
 
         headers = {
@@ -436,9 +435,10 @@ class InvoiceMail(models.Model):
                 _logger.error(f"Error HTTP {response.status_code}: {response.text}")
                 raise UserError(f"Error SOAP. Código HTTP: {response.status_code}")
 
-            # 3) PUBLICAR RESPONSE EN CHATTER
+            # --> Si quieres ver en el log la response completa:
+            _logger.info(f"SOAP Response Body:\n{response.text}")
+
             self.post_xml_to_chatter(response.text, description=f"SOAP Response from {url}")
-            # 4) GUARDAR RESPONSE EN ADJUNTO
             self._store_soap_documents("soap_response", response.text)
 
             return response.text
