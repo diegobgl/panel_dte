@@ -613,14 +613,35 @@ class InvoiceMail(models.Model):
     def check_sii_status(self):
         """
         Consulta el estado del DTE en el SII y registra los XML generados en el Chatter.
+        Toma el RUT consultante (quien firma y envía) desde self.env.company.vat
+        y asume que coincide con RutCompania. El RUT Receptor se lee de self.partner_rut.
         """
         self.ensure_one()
         try:
-            # Logueamos en el servidor
             _logger.info(
-                f"Consultando estado DTE en SII para el RUT: {self.company_rut}, "
+                f"Consultando el estado del DTE en el SII para la factura {self.name}, "
                 f"TipoDoc: {self.document_type.code}, Folio: {self.folio_number}"
             )
+
+            # --------------------------------------------------------------------------------
+            # RUT consultante y RUT compañía: tomados desde la compañía principal de Odoo
+            # --------------------------------------------------------------------------------
+            if not self.env.company.vat:
+                raise UserError("No se ha definido el RUT de la compañía principal en Odoo.")
+
+            rut_consultante = self.env.company.vat[:-2]
+            dv_consultante = self.env.company.vat[-1]
+            rut_compania = rut_consultante
+            dv_compania = dv_consultante
+
+            # RUT receptor (tomado desde la factura)
+            if not self.partner_rut:
+                raise UserError("No existe RUT receptor en esta factura.")
+            rut_receptor = self.partner_rut[:-2]
+            dv_receptor = self.partner_rut[-1]
+
+            if not self.date_emission:
+                raise UserError("La factura no tiene Fecha de Emisión (date_emission).")
 
             # 1) Obtener la semilla
             seed = self._get_seed()
@@ -641,12 +662,12 @@ class InvoiceMail(models.Model):
                 <soapenv:Header/>
                 <soapenv:Body>
                     <dte:getEstDte>
-                        <RutConsultante>{self.company_rut[:-2]}</RutConsultante>
-                        <DvConsultante>{self.company_rut[-1]}</DvConsultante>
-                        <RutCompania>{self.company_rut[:-2]}</RutCompania>
-                        <DvCompania>{self.company_rut[-1]}</DvCompania>
-                        <RutReceptor>{self.partner_rut[:-2]}</RutReceptor>
-                        <DvReceptor>{self.partner_rut[-1]}</DvReceptor>
+                        <RutConsultante>{rut_consultante}</RutConsultante>
+                        <DvConsultante>{dv_consultante}</DvConsultante>
+                        <RutCompania>{rut_compania}</RutCompania>
+                        <DvCompania>{dv_compania}</DvCompania>
+                        <RutReceptor>{rut_receptor}</RutReceptor>
+                        <DvReceptor>{dv_receptor}</DvReceptor>
                         <TipoDte>{self.document_type.code}</TipoDte>
                         <FolioDte>{self.folio_number}</FolioDte>
                         <FechaEmisionDte>{self.date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
@@ -656,6 +677,8 @@ class InvoiceMail(models.Model):
                 </soapenv:Body>
             </soapenv:Envelope>
             """
+
+            # Registrar la solicitud en el Chatter
             self.post_xml_to_chatter(soap_request, description="Solicitud SOAP Consulta Estado DTE")
 
             # 5) Enviar la solicitud
@@ -678,7 +701,9 @@ class InvoiceMail(models.Model):
             glosa_element = response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=namespaces)
             glosa = glosa_element.text if glosa_element is not None else ''
 
-            # 7) Actualizar estado en este registro
+            _logger.info(f"SII respondió ESTADO={estado}, GLOSA={glosa}")
+
+            # 7) Actualizar el estado en este registro
             if estado == '00':
                 self.l10n_cl_dte_status = 'accepted'
             elif estado in ['01','02','03','04','05','06','07','08','09','10','11','12','-3']:
@@ -697,6 +722,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error consultando el estado del DTE: {e}")
             raise UserError(f"Error consultando el estado del DTE en el SII: {e}")
+
 
     #def validate xml funcional ok
     def _validate_sii_response(self, response_data):
