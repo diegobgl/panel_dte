@@ -3,7 +3,7 @@ import urllib3
 import base64
 import logging
 import html
-import hashlib  
+import hashlib
 import xml.etree.ElementTree as ET
 from lxml import etree
 from OpenSSL import crypto
@@ -16,7 +16,6 @@ from odoo.tools import email_split
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
-
 
 
 class InvoiceMail(models.Model):
@@ -39,8 +38,7 @@ class InvoiceMail(models.Model):
     xml_file = fields.Binary(string='Archivo XML', attachment=True)
     pdf_preview = fields.Binary(string='Previsualización PDF', attachment=True)
     line_ids = fields.One2many('invoice.mail.line', 'invoice_id', string='Detalle de Productos')
-    l10n_cl_reference_ids = fields.One2many(
-        'invoice.mail.reference', 'invoice_mail_id', string="References")
+    l10n_cl_reference_ids = fields.One2many('invoice.mail.reference', 'invoice_mail_id', string="References")
     currency_id = fields.Many2one(
         comodel_name="res.currency",
         string="Currency",
@@ -57,9 +55,6 @@ class InvoiceMail(models.Model):
         ('rejected', 'Rejected'),
     ], string='SII Status', default='not_sent')
     response_raw = fields.Text(string="Respuesta XML Cruda", help="Almacena la respuesta XML cruda del SII para su análisis.")
-
-
-
 
 
     @api.model
@@ -80,11 +75,10 @@ class InvoiceMail(models.Model):
         return True
 
 
-
     @api.model
     def message_new(self, msg_dict, custom_values=None):
         """
-        Procesar un correo electrónico recibido, extraer el XML y PDF adjuntos, 
+        Procesar un correo electrónico recibido, extraer el XML y PDF adjuntos,
         crear el registro del documento y manejar los detalles de productos o servicios.
         """
         custom_values = custom_values or {}
@@ -202,7 +196,6 @@ class InvoiceMail(models.Model):
         )
 
         return record
-        
 
     @api.depends('xml_file')
     def _compute_attachments_count(self):
@@ -234,8 +227,6 @@ class InvoiceMail(models.Model):
             raise UserError("El certificado configurado está expirado o no es válido.")
         return certificate
 
-
-    # get dte claim funcional ok
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
         try:
             # Paso 1: Obtener semilla
@@ -250,7 +241,7 @@ class InvoiceMail(models.Model):
             token = self._get_token(signed_seed)
             _logger.info(f"Token obtenido correctamente: {token}")
 
-            # Paso 4: Consultar estado del DTE
+            # Paso 4: Consultar estado del DTE (ejemplo)
             estado_dte = self._get_dte_status(token)
             _logger.info(f"Estado del DTE obtenido: {estado_dte}")
 
@@ -259,8 +250,8 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error general en la consulta del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE: {e}")
-    
-   
+
+
     def _get_token(self, signed_seed):
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         soap_request = f"""
@@ -352,10 +343,15 @@ class InvoiceMail(models.Model):
                 _logger.error(f"Error al parsear el XML desescapado: {e}")
                 raise UserError(f"Error al parsear el XML desescapado: {e}")
 
-            # Buscar el nodo SEMILLA
+            # Buscar RESP_BODY con namespace
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
-            seed_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
+            resp_body_node = decoded_response.find('.//SII:RESP_BODY', namespaces=sii_ns)
+            if resp_body_node is None:
+                _logger.error("No se encontró el nodo 'RESP_BODY' con prefijo SII.")
+                raise UserError("No se encontró el nodo 'RESP_BODY' en el XML procesado.")
 
+            # Dentro de RESP_BODY, buscar SEMILLA (sin namespace)
+            seed_node = resp_body_node.find('SEMILLA')
             if seed_node is None or not seed_node.text:
                 _logger.error("No se encontró el nodo 'SEMILLA' en el XML procesado.")
                 raise UserError("No se encontró el nodo 'SEMILLA' en el XML procesado.")
@@ -366,7 +362,6 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
             raise UserError(f"Error al obtener la semilla: {e}")
-
 
     def _sign_seed(self, seed):
         """
@@ -391,16 +386,32 @@ class InvoiceMail(models.Model):
             # Crear el nodo SignedInfo con namespaces
             nsmap = {"ds": "http://www.w3.org/2000/09/xmldsig#"}
             signed_info = etree.Element("{http://www.w3.org/2000/09/xmldsig#}SignedInfo", nsmap=nsmap)
-            etree.SubElement(signed_info, "{http://www.w3.org/2000/09/xmldsig#}CanonicalizationMethod",
-                            Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315")
-            etree.SubElement(signed_info, "{http://www.w3.org/2000/09/xmldsig#}SignatureMethod",
-                            Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1")
-            reference = etree.SubElement(signed_info, "{http://www.w3.org/2000/09/xmldsig#}Reference", URI="")
+            etree.SubElement(
+                signed_info,
+                "{http://www.w3.org/2000/09/xmldsig#}CanonicalizationMethod",
+                Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
+            )
+            etree.SubElement(
+                signed_info,
+                "{http://www.w3.org/2000/09/xmldsig#}SignatureMethod",
+                Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+            )
+            reference = etree.SubElement(
+                signed_info,
+                "{http://www.w3.org/2000/09/xmldsig#}Reference",
+                URI=""
+            )
             transforms = etree.SubElement(reference, "{http://www.w3.org/2000/09/xmldsig#}Transforms")
-            etree.SubElement(transforms, "{http://www.w3.org/2000/09/xmldsig#}Transform",
-                            Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature")
-            etree.SubElement(reference, "{http://www.w3.org/2000/09/xmldsig#}DigestMethod",
-                            Algorithm="http://www.w3.org/2000/09/xmldsig#sha1")
+            etree.SubElement(
+                transforms,
+                "{http://www.w3.org/2000/09/xmldsig#}Transform",
+                Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"
+            )
+            etree.SubElement(
+                reference,
+                "{http://www.w3.org/2000/09/xmldsig#}DigestMethod",
+                Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"
+            )
 
             # Calcular DigestValue de la semilla
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
@@ -420,12 +431,22 @@ class InvoiceMail(models.Model):
             key_info = etree.Element("{http://www.w3.org/2000/09/xmldsig#}KeyInfo", nsmap=nsmap)
             key_value = etree.SubElement(key_info, "{http://www.w3.org/2000/09/xmldsig#}KeyValue")
             rsa_key_value = etree.SubElement(key_value, "{http://www.w3.org/2000/09/xmldsig#}RSAKeyValue")
-            modulus = base64.b64encode(private_key.private_numbers().public_numbers.n.to_bytes(
-                (private_key.private_numbers().public_numbers.n.bit_length() + 7) // 8, byteorder="big"
-            )).decode('utf-8')
-            exponent = base64.b64encode(private_key.private_numbers().public_numbers.e.to_bytes(
-                (private_key.private_numbers().public_numbers.e.bit_length() + 7) // 8, byteorder="big"
-            )).decode('utf-8')
+
+            # Modulus
+            modulus = base64.b64encode(
+                private_key.private_numbers().public_numbers.n.to_bytes(
+                    (private_key.private_numbers().public_numbers.n.bit_length() + 7) // 8,
+                    byteorder="big"
+                )
+            ).decode('utf-8')
+            # Exponent
+            exponent = base64.b64encode(
+                private_key.private_numbers().public_numbers.e.to_bytes(
+                    (private_key.private_numbers().public_numbers.e.bit_length() + 7) // 8,
+                    byteorder="big"
+                )
+            ).decode('utf-8')
+
             etree.SubElement(rsa_key_value, "{http://www.w3.org/2000/09/xmldsig#}Modulus").text = modulus
             etree.SubElement(rsa_key_value, "{http://www.w3.org/2000/09/xmldsig#}Exponent").text = exponent
 
@@ -457,16 +478,16 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al firmar la semilla: {e}")
 
 
-
-
-
     def check_sii_status(self):
         """
         Consulta el estado del DTE en el SII y registra los XML generados en el Chatter.
         """
         self.ensure_one()
         try:
-            _logger.info(f"Consultando el estado del DTE en el SII para el RUT: {self.company_rut}, TipoDoc: {self.document_type.code}, Folio: {self.folio_number}")
+            _logger.info(
+                f"Consultando el estado del DTE en el SII para el RUT: {self.company_rut}, "
+                f"TipoDoc: {self.document_type.code}, Folio: {self.folio_number}"
+            )
 
             # Solicitar la semilla
             seed = self._get_seed()
@@ -506,14 +527,13 @@ class InvoiceMail(models.Model):
             self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Estado del DTE al SII")
 
             # Enviar la solicitud
-            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws" # URL de ejemplo, PRODUCCION es otra
+            status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"  # URL ejemplo
             response_data = self._send_soap_request(status_url, soap_request, '')
 
             # Parsear la respuesta y registrar en el Chatter
             self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Consulta de Estado DTE")
 
             response_root = etree.fromstring(response_data)
-            # Asegúrate de que los namespaces estén correctamente definidos
             namespaces = {'SII': 'http://www.sii.cl/XMLSchema', 'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
 
             # Extraer el estado de la respuesta
@@ -544,9 +564,10 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al consultar el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
 
-
-    #def validate xml funcional ok
     def _validate_sii_response(self, response_data):
+        """
+        Valida la respuesta del SII revisando el nodo ESTADO.
+        """
         try:
             root = etree.fromstring(response_data)
             estado = root.find('.//ESTADO')
@@ -557,7 +578,6 @@ class InvoiceMail(models.Model):
             raise UserError(f"Respuesta del SII no válida: {e}")
 
 
-    # DEF POST XML TO CHATTER FUNCIONAL OK
     def post_xml_to_chatter(self, xml_content, description="XML generado para el SII"):
         """
         Registra el contenido de un XML en el Chatter de Odoo.
@@ -588,26 +608,18 @@ class InvoiceMail(models.Model):
         if isinstance(data, str):
             data = data.encode('utf-8')  # Asegurar que los datos estén en bytes
 
-        # Calcular el hash SHA-1
         digest = hashlib.sha1(data).digest()
-
-        # Convertir el resultado del hash a Base64
         return base64.b64encode(digest).decode('utf-8')
 
     def _get_signature_value(self, private_key, signed_info):
         """
         Firma el bloque SignedInfo usando la clave privada proporcionada.
-        :param private_key: Clave privada en formato OpenSSL.
-        :param signed_info: Bloque SignedInfo que se firmará.
-        :return: La firma en Base64.
         """
         try:
             signature = crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')
             return base64.b64encode(signature).decode('utf-8')
         except Exception as e:
             raise UserError(f"Error al generar el SignatureValue: {str(e)}")
-
-
 
     def save_signed_xml(self, xml_signed):
         """
@@ -625,24 +637,18 @@ class InvoiceMail(models.Model):
         Guarda la solicitud y la respuesta SOAP como un archivo adjunto en xml_signed_file.
         """
         try:
-            # Crear contenido en texto
             content = f"--- SOAP Request ---\n{request}\n\n--- SOAP Response ---\n{response}"
-
-            # Convertir a binario
             content_binary = base64.b64encode(content.encode('utf-8'))
 
-            # Guardar en el campo xml_signed_file
             self.xml_signed_file = content_binary
             _logger.info("La solicitud y la respuesta SOAP se han guardado en xml_signed_file correctamente.")
 
-            # Registrar en el Chatter
             self.sudo().message_post(
-                body=f"Solicitud y respuesta SOAP guardadas como archivo adjunto.",
+                body="Solicitud y respuesta SOAP guardadas como archivo adjunto.",
                 subject="SOAP Documentos Registrados",
                 message_type='comment',
                 subtype_xmlid='mail.mt_note',
             )
-
         except Exception as e:
             _logger.error(f"Error al guardar solicitud y respuesta SOAP: {e}")
             raise UserError(f"Error al guardar solicitud y respuesta SOAP: {e}")
@@ -658,8 +664,7 @@ class InvoiceMailLine(models.Model):
     quantity = fields.Float(string='Cantidad')
     price_unit = fields.Float(string='Precio Unitario')
     subtotal = fields.Float(string='Subtotal', compute='_compute_subtotal', store=True)
-    description = fields.Text(string='Descripción')  
-
+    description = fields.Text(string='Descripción')
 
     @api.depends('quantity', 'price_unit')
     def _compute_subtotal(self):
@@ -678,6 +683,7 @@ class InvoiceMailReport(models.AbstractModel):
             'doc_model': 'invoice.mail',
             'docs': docs,
         }
+
 
 class InvoiceMailReference(models.Model):
     _name = 'invoice.mail.reference'
