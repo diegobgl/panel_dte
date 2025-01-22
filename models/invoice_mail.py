@@ -350,6 +350,7 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al obtener la semilla: {e}")
             raise UserError(f"Error al obtener la semilla: {e}")
 
+
     def _sign_seed(self, seed):
         """
         Firma la semilla utilizando el certificado configurado y devuelve el XML firmado.
