@@ -330,11 +330,17 @@ class InvoiceMail(models.Model):
             if get_seed_return is None or not get_seed_return.text:
                 raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta.")
 
-            # Desescapar el contenido XML dentro de <getSeedReturn>
+            # Desescapar y validar contenido del XML de la semilla
             unescaped_content = html.unescape(get_seed_return.text)
 
+            # Debugging adicional para validar el XML desescapado
+            _logger.debug(f"Contenido XML desescapado: {unescaped_content}")
+
             # Parsear el XML desescapado
-            decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
+            try:
+                decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
+            except etree.XMLSyntaxError as e:
+                raise UserError(f"Error al parsear el XML desescapado: {e}")
 
             # Definir el namespace de SII
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
