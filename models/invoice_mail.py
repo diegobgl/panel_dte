@@ -346,7 +346,8 @@ class InvoiceMail(models.Model):
 
             except Exception as e:
                 _logger.error(f"Error al obtener la semilla: {e}")
-                raise UserError(f"Error al obtener la semilla: {e}")    
+                raise UserError(f"Error al obtener la semilla: {e}")
+                    
     def _process_seed_response(self):
         """
         Procesa la respuesta almacenada en `response_raw` para extraer la semilla.
