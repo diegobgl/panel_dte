@@ -332,9 +332,6 @@ class InvoiceMail(models.Model):
    
    
     def _get_token(self, signed_seed):
-        """
-        Solicita un token al SII utilizando la semilla firmada.
-        """
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
         soap_request = f"""
         <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
@@ -347,39 +344,21 @@ class InvoiceMail(models.Model):
         </soapenv:Envelope>
         """
         try:
-            # Registrar solicitud
-            _logger.info("Enviando solicitud de token al SII.")
-            self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Token al SII")
-
-            # Enviar solicitud SOAP
             response_data = self._send_soap_request(token_url, soap_request, 'urn:getToken')
+            self.response_raw = response_data  # Guardar respuesta cruda
 
-            # Registrar respuesta
-            self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Solicitud de Token")
-
-            # Procesar respuesta
+            # Parsear respuesta
             response_root = etree.fromstring(response_data.encode('utf-8'))
-            ns = {'SII': 'http://www.sii.cl/XMLSchema'}
+            sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
+            token_node = response_root.find('.//SII:RESP_BODY/TOKEN', namespaces=sii_ns)
 
-            estado = response_root.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=ns).text
-            glosa = response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=ns).text if response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=ns) else ""
-            token = response_root.find('.//SII:RESP_BODY/TOKEN', namespaces=ns).text if response_root.find('.//SII:RESP_BODY/TOKEN', namespaces=ns) else None
+            if token_node is None or not token_node.text:
+                raise UserError("No se encontró el nodo 'TOKEN' en la respuesta.")
 
-            _logger.info(f"Respuesta del SII: ESTADO={estado}, GLOSA={glosa}, TOKEN={token}")
-
-            # Validar estado
-            if estado != "00":
-                raise UserError(f"Error en respuesta del SII: {glosa} (Estado: {estado})")
-
-            if not token:
-                raise UserError("La respuesta del SII no contiene un token válido.")
-
-            _logger.info(f"Token obtenido correctamente: {token}")
-            return token
+            return token_node.text
 
         except Exception as e:
             _logger.error(f"Error al obtener el token: {e}")
-            self.sudo().post_xml_to_chatter(str(e), description="Error en Solicitud de Token")
             raise UserError(f"Error al obtener el token: {e}")
 
     def _send_soap_request(self, url, soap_body, soap_action_header):
@@ -421,9 +400,6 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
 
     def _get_seed(self):
-        """
-        Solicita una semilla al SII y la extrae de la respuesta, ignorando otros nodos.
-        """
         seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
         soap_request = """
         <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
@@ -434,38 +410,30 @@ class InvoiceMail(models.Model):
         </soapenv:Envelope>
         """
         try:
-            # Enviar la solicitud al SII
+            # Realizar solicitud
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
+            self.response_raw = response_data  # Guardar respuesta cruda
 
-            # Guardar la respuesta completa en el campo `response_raw`
-            self.response_raw = response_data
-
-            # Parsear el XML recibido
+            # Parsear y desescapar nodo getSeedReturn
             response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             get_seed_return = response_root.find('.//soapenv:Body//getSeedReturn', namespaces=ns)
 
             if get_seed_return is None or not get_seed_return.text:
-                raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta del SII.")
+                raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta.")
 
-            # Desescapar y procesar el contenido de `getSeedReturn`
+            # Construir árbol XML desde contenido desescapado
             decoded_response_str = html.unescape(get_seed_return.text)
-            _logger.debug(f"Contenido desescapado del XML: {decoded_response_str}")
-
-            # Construir un árbol XML con el contenido desescapado
             decoded_response = etree.fromstring(decoded_response_str.encode('utf-8'))
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
 
-            # Extraer únicamente el nodo `<SEMILLA>`
+            # Buscar nodo SEMILLA
             semilla_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
 
             if semilla_node is None or not semilla_node.text:
-                _logger.error(f"Nodo 'SEMILLA' no encontrado en el XML decodificado: {decoded_response_str}")
-                raise UserError("El nodo 'SEMILLA' no fue encontrado en el XML decodificado.")
+                raise UserError("No se encontró el nodo 'SEMILLA' en el XML decodificado.")
 
-            semilla = semilla_node.text
-            _logger.info(f"Semilla obtenida correctamente: {semilla}")
-            return semilla
+            return semilla_node.text
 
         except Exception as e:
             _logger.error(f"Error al obtener la semilla: {e}")
@@ -491,7 +459,7 @@ class InvoiceMail(models.Model):
             public_cert = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
             x509_cert_b64 = base64.b64encode(public_cert).decode('utf-8')
 
-            # Crear el nodo SignedInfo con namespace explícito
+            # Crear el nodo SignedInfo con namespaces
             nsmap = {"ds": "http://www.w3.org/2000/09/xmldsig#"}
             signed_info = etree.Element("{http://www.w3.org/2000/09/xmldsig#}SignedInfo", nsmap=nsmap)
             etree.SubElement(signed_info, "{http://www.w3.org/2000/09/xmldsig#}CanonicalizationMethod",
@@ -519,7 +487,7 @@ class InvoiceMail(models.Model):
             )
             signature_value = base64.b64encode(signature).decode('utf-8')
 
-            # Crear KeyInfo con namespace explícito
+            # Crear KeyInfo con namespaces
             key_info = etree.Element("{http://www.w3.org/2000/09/xmldsig#}KeyInfo", nsmap=nsmap)
             key_value = etree.SubElement(key_info, "{http://www.w3.org/2000/09/xmldsig#}KeyValue")
             rsa_key_value = etree.SubElement(key_value, "{http://www.w3.org/2000/09/xmldsig#}RSAKeyValue")
@@ -550,8 +518,8 @@ class InvoiceMail(models.Model):
             # Convertir el nodo a una cadena XML
             signed_xml = etree.tostring(get_token, pretty_print=True, xml_declaration=True, encoding="UTF-8").decode('utf-8')
 
-            # Registrar el XML firmado en el chatter
-            self.sudo().post_xml_to_chatter(signed_xml, description="XML Firmado para el SII")
+            # Registrar el XML firmado en el campo raw
+            self.response_raw = signed_xml
             _logger.info("Semilla firmada correctamente.")
             return signed_xml
 
