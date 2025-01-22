@@ -220,116 +220,29 @@ class InvoiceMail(models.Model):
 
     # get dte claim funcional ok
     def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
-        """
-        Consulta el estado del DTE en el SII utilizando una solicitud SOAP.
-        """
         try:
-            # URL del servicio SOAP
-            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
+            # Paso 1: Obtener semilla
+            seed = self._get_seed()
+            _logger.info(f"Semilla obtenida: {seed}")
 
-            # Generar un nuevo token antes de la consulta
-            _logger.info("Generando token para la consulta del DTE.")
-            token = self._get_token(self._sign_seed(self._get_seed()))  # Token generado desde la lógica de semilla y firma
-            if not token:
-                raise UserError("No se pudo generar un token válido para la consulta al SII.")
+            # Paso 2: Firmar semilla
+            signed_seed = self._sign_seed(seed)
+            _logger.info("Semilla firmada correctamente.")
 
-            # Separar RUT y dígito verificador
-            rut_emisor = company_vat[:-2]
-            dv_emisor = company_vat[-1]
-            rut_receptor = self.partner_rut[:-2]
-            dv_receptor = self.partner_rut[-1]
-            rut_consultante = company_vat[:-2]
-            dv_consultante = company_vat[-1]
+            # Paso 3: Obtener token
+            token = self._get_token(signed_seed)
+            _logger.info(f"Token obtenido correctamente: {token}")
 
-            # Crear el cuerpo del XML para la solicitud SOAP
-            soap_request = f"""
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
-                <soapenv:Header/>
-                <soapenv:Body>
-                    <dte:getEstDte>
-                        <RutConsultante>{rut_consultante}</RutConsultante>
-                        <DvConsultante>{dv_consultante}</DvConsultante>
-                        <RutCompania>{rut_emisor}</RutCompania>
-                        <DvCompania>{dv_emisor}</DvCompania>
-                        <RutReceptor>{rut_receptor}</RutReceptor>
-                        <DvReceptor>{dv_receptor}</DvReceptor>
-                        <TipoDte>{document_type_code}</TipoDte>
-                        <FolioDte>{document_number}</FolioDte>
-                        <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
-                        <MontoDte>{int(amount_total)}</MontoDte>
-                        <Token>{token}</Token>
-                    </dte:getEstDte>
-                </soapenv:Body>
-            </soapenv:Envelope>
-            """
+            # Paso 4: Consultar estado del DTE
+            estado_dte = self._get_dte_status(token)
+            _logger.info(f"Estado del DTE obtenido: {estado_dte}")
 
-            # Registrar la solicitud en logs y Chatter
-            _logger.info(f"Enviando solicitud de estado del DTE al SII con los parámetros:\n{soap_request}")
-            self.sudo().post_xml_to_chatter(soap_request, description="Solicitud de Estado del DTE al SII")
-
-            # Configurar urllib3
-            http = urllib3.PoolManager()
-            headers = {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': ''
-            }
-
-            # Enviar la solicitud
-            response = http.request(
-                'POST',
-                url,
-                body=soap_request.encode('utf-8'),
-                headers=headers
-            )
-
-            # Validar el código de respuesta HTTP
-            if response.status != 200:
-                _logger.error(f"Error HTTP al consultar el estado del DTE: {response.status}")
-                raise UserError(f"Error HTTP al consultar el estado del DTE: {response.status}")
-
-            # Parsear la respuesta SOAP
-            response_data = response.data.decode('utf-8')
-            response_xml = etree.fromstring(response.data)
-            _logger.info(f"Respuesta completa del SII:\n{etree.tostring(response_xml, pretty_print=True).decode()}")
-            self.sudo().post_xml_to_chatter(response_data, description="Respuesta del SII para Estado del DTE")
-
-            # Extraer el estado del DTE desde la respuesta
-            ns = {
-                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                'sii': 'http://www.sii.cl/XMLSchema'
-            }
-            estado_element = response_xml.xpath('//sii:ESTADO', namespaces=ns)
-            glosa_element = response_xml.xpath('//sii:GLOSA', namespaces=ns)
-
-            estado = estado_element[0].text if estado_element else None
-            glosa = glosa_element[0].text if glosa_element else "Sin información adicional"
-
-            # Validar estado y loguear resultados
-            if not estado:
-                _logger.error("No se encontró el estado en la respuesta del SII.")
-                raise UserError("No se pudo determinar el estado del DTE en la respuesta del SII.")
-
-            _logger.info(f"Estado del DTE: {estado} - {glosa}")
-
-            # Registrar en el Chatter
-            self.sudo().message_post(
-                body=f"Estado del DTE recibido: {estado} - {glosa}",
-                subject="Consulta de Estado DTE",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
-
-            # Devolver el estado del DTE
-            return estado
+            return estado_dte
 
         except Exception as e:
-            _logger.error(f"Error general al consultar el estado del DTE: {e}")
-            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
-        
-        
-
-        #get token funcional 
-   
+            _logger.error(f"Error general en la consulta del DTE: {e}")
+            raise UserError(f"Error al consultar el estado del DTE: {e}")
+    
    
     def _get_token(self, signed_seed):
         token_url = "https://palena.sii.cl/DTEWS/GetTokenFromSeed.jws"
