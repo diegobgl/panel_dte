@@ -291,33 +291,28 @@ class InvoiceMail(models.Model):
             _logger.error(f"Error al obtener el token: {e}")
             raise UserError(f"Error al obtener el token: {e}")
 
-    def _send_soap_request(self, url, soap_body, soap_action_header):
+    def _send_soap_request(self, url, soap_body, soap_action_header=''):
         """
         Envía una solicitud SOAP al SII y registra tanto la solicitud como la respuesta.
         """
         try:
             _logger.info(f"Enviando solicitud SOAP a {url}.")
-            http = urllib3.PoolManager()
+            _logger.debug(f"SOAP Body enviado:\n{soap_body}")
+
             headers = {'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': soap_action_header}
+            response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, timeout=30)
 
-            # Enviar la solicitud
-            response = http.request('POST', url, body=soap_body.encode('utf-8'), headers=headers)
+            if response.status_code != 200:
+                _logger.error(f"Error HTTP {response.status_code}: {response.text}")
+                raise UserError(f"Error al enviar solicitud SOAP. Código HTTP: {response.status_code}")
 
-            # Verificar el código de respuesta HTTP
-            if response.status != 200:
-                raise UserError(f"Error HTTP {response.status} al enviar solicitud a {url}")
+            _logger.info(f"Respuesta HTTP recibida desde {url}:\n{response.text}")
+            self.response_raw = response.text  # Guardar la respuesta cruda en el campo
+            return response.text
 
-            # Procesar la respuesta
-            response_data = response.data.decode('utf-8')
-            _logger.info(f"Respuesta HTTP recibida desde {url}: {response_data}")
-
-            # Guardar la respuesta en el modelo
-            self.response_raw = response_data
-            return response_data
-
-        except Exception as e:
-            _logger.error(f"Error al enviar solicitud SOAP a {url}: {e}")
-            raise UserError(f"Error al enviar solicitud SOAP a {url}: {e}")
+        except requests.exceptions.RequestException as e:
+            _logger.error(f"Error al enviar solicitud SOAP: {e}")
+            raise UserError(f"Error al enviar solicitud SOAP: {e}")
 
     def _get_seed(self):
         """
@@ -333,40 +328,39 @@ class InvoiceMail(models.Model):
         </soapenv:Envelope>
         """
         try:
-            # Realizar la solicitud SOAP
+            # Enviar solicitud SOAP
             response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
-
-            # Guardar la respuesta cruda
-            self.response_raw = response_data
 
             # Parsear la respuesta SOAP
             response_root = etree.fromstring(response_data.encode('utf-8'))
             ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+
+            # Extraer el nodo getSeedReturn
             get_seed_return = response_root.find('.//soapenv:Body//getSeedResponse//getSeedReturn', namespaces=ns)
-
             if get_seed_return is None or not get_seed_return.text:
-                raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta.")
+                _logger.error("No se encontró el nodo 'getSeedReturn' en la respuesta SOAP.")
+                raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta SOAP.")
 
-            # Desescapar y validar contenido del XML de la semilla
+            # Desescapar contenido de getSeedReturn
             unescaped_content = html.unescape(get_seed_return.text)
-            _logger.debug(f"Contenido XML desescapado: {unescaped_content}")
+            _logger.debug(f"Contenido XML desescapado:\n{unescaped_content}")
 
-            # Parsear el XML desescapado
+            # Parsear el contenido desescapado como XML
             try:
                 decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
             except etree.XMLSyntaxError as e:
                 _logger.error(f"Error al parsear el XML desescapado: {e}")
                 raise UserError(f"Error al parsear el XML desescapado: {e}")
 
-            # Definir el namespace de SII
+            # Buscar el nodo SEMILLA
             sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
-
-            # Buscar el nodo SEMILLA dentro del XML desescapado
             seed_node = decoded_response.find('.//SII:RESP_BODY/SII:SEMILLA', namespaces=sii_ns)
+
             if seed_node is None or not seed_node.text:
+                _logger.error("No se encontró el nodo 'SEMILLA' en el XML procesado.")
                 raise UserError("No se encontró el nodo 'SEMILLA' en el XML procesado.")
 
-            # Retornar el valor de la semilla
+            _logger.info(f"Semilla obtenida correctamente: {seed_node.text}")
             return seed_node.text
 
         except Exception as e:
