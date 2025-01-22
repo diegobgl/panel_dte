@@ -262,36 +262,42 @@ class InvoiceMail(models.Model):
     def _sign_seed(self, seed):
         """
         Firma la semilla utilizando el certificado configurado y devuelve el XML firmado
-        en el formato que exige el SII (sin prefijo ds: y sin <?xml ...> dentro de <getToken>).
+        en el formato que exige el SII (sin prefijo ds:, sin cabeceras PEM, y sin <?xml ...>).
         """
         try:
-            # 1) Obtener el certificado activo (PKCS12)
+            # 1) Obtener y validar el certificado activo
             certificate = self._get_active_certificate()
             if not certificate.signature_key_file or not certificate.signature_pass_phrase:
                 raise UserError("El certificado configurado no es válido o falta la contraseña.")
 
+            # 2) Cargar el PKCS12
             pfx_data = base64.b64decode(certificate.signature_key_file)
             p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
 
-            # 2) Extraer clave privada y certificado público
+            # 3) Extraer clave privada
             private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
             private_key = load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-            public_cert = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
-            x509_cert_b64 = base64.b64encode(public_cert).decode('utf-8')
 
-            # 3) Crear estructura XML <getToken> ... <Signature> ... según exige SII
-            #    a) Nodo raiz <getToken>
+            # 4) Extraer certificado en PEM, quitar BEGIN/END y saltos de línea para dejar solo Base64
+            public_cert_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
+            public_cert_pem_str = public_cert_pem.decode('utf-8')
+            public_cert_pem_str = public_cert_pem_str.replace("-----BEGIN CERTIFICATE-----", "")
+            public_cert_pem_str = public_cert_pem_str.replace("-----END CERTIFICATE-----", "")
+            public_cert_pem_str = public_cert_pem_str.replace("\n", "").strip()
+            x509_cert_b64 = public_cert_pem_str  # Esto es solo el contenido base64 del certificado
+
+            # -------------------- Construir el XML <getToken> --------------------
+            # <getToken>
             get_token = etree.Element("getToken")
 
-            #    b) <item><Semilla>...</Semilla></item>
+            # <item><Semilla>...</Semilla></item>
             item = etree.SubElement(get_token, "item")
             etree.SubElement(item, "Semilla").text = seed
 
-            #    c) <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-            #       Esto define un namespace por DEFECTO (sin prefijo)
+            # <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
             signature_node = etree.Element("Signature", nsmap={None: "http://www.w3.org/2000/09/xmldsig#"})
 
-            # 4) Crear el bloque <SignedInfo>
+            # <SignedInfo>
             signed_info = etree.SubElement(signature_node, "SignedInfo")
             etree.SubElement(
                 signed_info,
@@ -316,15 +322,15 @@ class InvoiceMail(models.Model):
                 Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"
             )
 
-            # 5) Calcular y agregar <DigestValue> según la semilla
+            # Calcular <DigestValue> de la semilla
             digest = hashlib.sha1(seed.encode('utf-8')).digest()
             digest_value = base64.b64encode(digest).decode('utf-8')
             etree.SubElement(reference, "DigestValue").text = digest_value
 
-            # 6) Firmar el bloque SignedInfo con la clave privada
+            # Firmar <SignedInfo>
             signed_info_c14n = etree.tostring(
                 signed_info,
-                method="c14n",     # canonical XML
+                method="c14n",
                 exclusive=True,
                 with_comments=False
             )
@@ -335,15 +341,15 @@ class InvoiceMail(models.Model):
             )
             signature_value = base64.b64encode(signature).decode('utf-8')
 
-            # 7) Crear el nodo <SignatureValue> y asignar la firma
+            # <SignatureValue> con la firma resultante
             etree.SubElement(signature_node, "SignatureValue").text = signature_value
 
-            # 8) Crear <KeyInfo><KeyValue><RSAKeyValue> ... <Exponent> ... <X509Data>...
+            # <KeyInfo><KeyValue><RSAKeyValue><Modulus> + <Exponent>
             key_info = etree.SubElement(signature_node, "KeyInfo")
             key_value = etree.SubElement(key_info, "KeyValue")
             rsa_key_value = etree.SubElement(key_value, "RSAKeyValue")
 
-            #    a) Modulus
+            # Modulus
             modulus = base64.b64encode(
                 private_key.private_numbers().public_numbers.n.to_bytes(
                     (private_key.private_numbers().public_numbers.n.bit_length() + 7) // 8,
@@ -352,7 +358,7 @@ class InvoiceMail(models.Model):
             ).decode('utf-8')
             etree.SubElement(rsa_key_value, "Modulus").text = modulus
 
-            #    b) Exponent
+            # Exponent
             exponent = base64.b64encode(
                 private_key.private_numbers().public_numbers.e.to_bytes(
                     (private_key.private_numbers().public_numbers.e.bit_length() + 7) // 8,
@@ -361,24 +367,22 @@ class InvoiceMail(models.Model):
             ).decode('utf-8')
             etree.SubElement(rsa_key_value, "Exponent").text = exponent
 
-            #    c) <X509Data><X509Certificate>...
+            # <X509Data><X509Certificate>
             x509_data = etree.SubElement(key_info, "X509Data")
             etree.SubElement(x509_data, "X509Certificate").text = x509_cert_b64
 
-            # 9) Insertar <Signature> dentro de <getToken>
+            # Insertar el nodo <Signature> en <getToken>
             get_token.append(signature_node)
 
-            # 10) Convertir a cadena (sin <?xml ...>):
-            #     - pretty_print=True para que se vea ordenado
-            #     - xml_declaration=False para NO meter "<?xml version="..."?>"
+            # Convertir a string, sin <?xml ?> (xml_declaration=False)
             signed_xml = etree.tostring(
                 get_token,
                 pretty_print=True,
                 encoding="UTF-8",
-                xml_declaration=False  # <--- IMPORTANTE
+                xml_declaration=False
             ).decode('utf-8')
 
-            _logger.info("Semilla firmada correctamente (sin prefijo ds:).")
+            _logger.info("Semilla firmada correctamente (sin prefijo ds:, sin cabeceras PEM).")
             return signed_xml
 
         except Exception as e:
@@ -386,9 +390,9 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al firmar la semilla: {e}")
 
 
+
         
 
-        #get token funcional 
    
    
     def _get_token(self, signed_seed):
