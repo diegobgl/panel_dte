@@ -1,7 +1,7 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_invoice_mail_user,access_invoice_mail_user,model_invoice_mail,base.group_user,1,1,1,0
+access_invoice_mail_user,access_invoice_mail_user,model_invoice_mail,base.group_user,1,1,1,1
 access_invoice_mail_manager,access_invoice_mail_manager,model_invoice_mail,base.group_system,1,1,1,1
-access_invoice_mail_line_user,access_invoice_mail_line_user,model_invoice_mail_line,base.group_user,1,0,0,0
+access_invoice_mail_line_user,access_invoice_mail_line_user,model_invoice_mail_line,base.group_user,1,1,1,1
 access_invoice_mail_line_manager,access_invoice_mail_line_manager,model_invoice_mail_line,base.group_system,1,1,1,1
-access_invoice_mail_reference_user,access_invoice_mail_reference_user,model_invoice_mail_reference,base.group_user,1,0,0,0
+access_invoice_mail_reference_user,access_invoice_mail_reference_user,model_invoice_mail_reference,base.group_user,1,1,1,1
 access_invoice_mail_reference_manager,access_invoice_mail_reference_manager,model_invoice_mail_reference,base.group_system,1,1,1,1
