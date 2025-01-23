@@ -1,0 +1,16 @@
+<odoo>
+    <record id="view_api_config_settings_form" model="ir.ui.view">
+        <field name="name">api.config.settings.form</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//group[@name='interfaces']" position="inside">
+                <group name="my_api_settings" string="Configuración de la API interna">
+                    <field name="api_login_url"/>
+                    <field name="api_user"/>
+                    <field name="api_pass"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>

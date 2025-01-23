@@ -838,3 +838,40 @@ class InvoiceMailReference(models.Model):
     reference_doc_code = fields.Char(string="Reference Doc Code")
     reason = fields.Char(string="Reason")
     date = fields.Date(string="Date")
+
+class APIConfigSettings(models.TransientModel):
+    _inherit = 'res.config.settings'
+
+    # Campos para tu configuración
+    api_login_url = fields.Char(
+        string="API Login URL",
+        help="URL para la ruta de login de tu API interna.")
+    api_user = fields.Char(
+        string="Usuario para API",
+        help="Usuario (o email) para autenticarse en la API interna.")
+    api_pass = fields.Char(
+        string="Contraseña para API",
+        help="Contraseña para la API interna.",
+        password=True)  # Esto enmascara la visualización
+
+    # Aquí, las "keys" que usaremos en ir.config_parameter
+    @api.model
+    def get_values(self):
+        res = super(APIConfigSettings, self).get_values()
+        # Leer de ir.config_parameter
+        ICP = self.env['ir.config_parameter'].sudo()
+        res.update(
+            api_login_url=ICP.get_param('my_module.api_login_url', default=''),
+            api_user=ICP.get_param('my_module.api_user', default=''),
+            api_pass=ICP.get_param('my_module.api_pass', default=''),
+        )
+        return res
+
+    def set_values(self):
+        super(APIConfigSettings, self).set_values()
+        ICP = self.env['ir.config_parameter'].sudo()
+        # Guardar en ir.config_parameter
+        ICP.set_param('my_module.api_login_url', self.api_login_url or '')
+        ICP.set_param('my_module.api_user', self.api_user or '')
+        ICP.set_param('my_module.api_pass', self.api_pass or '')
+

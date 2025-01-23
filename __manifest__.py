@@ -9,6 +9,7 @@
     'data': [
         'views/invoice_mail_view.xml',
         'views/invoice_mail_report.xml',
+        'views/config_setting.xml',
         'report/invoice_mail_report_templates.xml',
         'security/ir.model.access.csv',
 
