@@ -392,34 +392,56 @@ class InvoiceMail(models.Model):
     def _get_token_from_internal_api(self):
         """
         Invoca tu API interna para obtener el token del SII.
-        1) Primero obtienes el token interno (login) si hace falta.
-        2) Luego invocas la URL de tu API que retorna el token del SII.
-        3) Retorna ese token final en texto plano.
+        Lee los parámetros (URL, usuario, password) desde la configuración 
+        (ir.config_parameter) que se setea en Ajustes / Configuración.
         """
-        # Ejemplo de estructura (adáptala a tu caso real):
-        api_login_url = "http://192.168.100.125:9000/api/login"
-        api_token_url = "http://192.168.100.125:9000/api/facturacion/obtenerTokenSII"
+        ICP = self.env['ir.config_parameter'].sudo()
 
-        # 1) Hacer login y obtener token interno
+        # Leer configuraciones de la BD (ingresadas vía res.config.settings)
+        api_login_url = ICP.get_param('my_module.api_login_url', '')
+        api_user = ICP.get_param('my_module.api_user', '')
+        api_pass = ICP.get_param('my_module.api_pass', '')
+
+        if not api_login_url or not api_user or not api_pass:
+            raise UserError("No se han configurado los parámetros de la API interna. "
+                            "Por favor, ve a Ajustes/Configuración y define la URL, usuario y contraseña.")
+
+        # 1) Autenticarse en la API interna (si procede)
         login_payload = {
-            'email': 'odoo@holdconet.cl',
-            'password': '0DO0$2024H'
+            'username': api_user,
+            'password': api_pass,
         }
+
+        # Este endpoint es el que definiste en tu API. Ajusta segun corresponda.
         response_login = requests.post(api_login_url, json=login_payload, timeout=30)
         if response_login.status_code != 200:
             raise UserError(f"Error al hacer login en la API interna: {response_login.text}")
+        
         login_data = response_login.json()
+        # Supongamos que tu API interna retorna 'access_token'
         internal_token = login_data.get('access_token')
         if not internal_token:
             raise UserError("No se obtuvo el token interno de la API.")
 
-        # 2) Llamar a la ruta de tu API para pedir el token del SII
-        headers = {'Authorization': f"Bearer {internal_token}"}
-        response_token = requests.post(api_token_url, headers=headers, timeout=30)
+        # 2) Llamar a la ruta para pedir el token del SII
+        #    Asumamos que la misma URL de login, o un endpoint distinto: 
+        #    'https://mi-api-interna.com/obtener-sii-token'
+        #    Usa la cabecera Authorization Bearer, etc.
+        # 
+        # Ajusta la URL y la forma de obtener token SII según tu API real:
+        api_sii_token_url = ICP.get_param('my_module.api_sii_token_url', '')
+        if not api_sii_token_url:
+            raise UserError("No se ha configurado la URL para obtener el token del SII en la API interna.")
+
+        headers = {
+            'Authorization': f"Bearer {internal_token}"
+        }
+        response_token = requests.post(api_sii_token_url, headers=headers, timeout=30)
         if response_token.status_code != 200:
             raise UserError(f"Error al pedir token del SII a la API interna: {response_token.text}")
 
         token_data = response_token.json()
+        # Suponiendo que la API retorna 'sii_token'
         sii_token = token_data.get('sii_token')
         if not sii_token:
             raise UserError("No se obtuvo el token del SII desde la API interna.")
