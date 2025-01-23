@@ -891,15 +891,19 @@ class APIConfigSettings(models.TransientModel):
         string="Contraseña para API",
         help="Contraseña para la API interna.",
         password=True)  # Esto enmascara la visualización
+    api_sii_token_url = fields.Char(
+        string="API SII Token URL",
+        help="URL para el endpoint /api/facturacion/obtenerTokenSII de la API interna."
+    )
 
     # Aquí, las "keys" que usaremos en ir.config_parameter
     @api.model
     def get_values(self):
         res = super(APIConfigSettings, self).get_values()
-        # Leer de ir.config_parameter
         ICP = self.env['ir.config_parameter'].sudo()
         res.update(
             api_login_url=ICP.get_param('my_module.api_login_url', default=''),
+            api_sii_token_url=ICP.get_param('my_module.api_sii_token_url', default=''),
             api_user=ICP.get_param('my_module.api_user', default=''),
             api_pass=ICP.get_param('my_module.api_pass', default=''),
         )
@@ -908,8 +912,8 @@ class APIConfigSettings(models.TransientModel):
     def set_values(self):
         super(APIConfigSettings, self).set_values()
         ICP = self.env['ir.config_parameter'].sudo()
-        # Guardar en ir.config_parameter
         ICP.set_param('my_module.api_login_url', self.api_login_url or '')
+        ICP.set_param('my_module.api_sii_token_url', self.api_sii_token_url or '')
         ICP.set_param('my_module.api_user', self.api_user or '')
         ICP.set_param('my_module.api_pass', self.api_pass or '')
 
