@@ -217,184 +217,215 @@ class InvoiceMail(models.Model):
     # -------------------------------------------------------------------------
 
 
-    def _get_seed(self):
+    # def _get_seed(self):
+    #     """
+    #     Obtiene y procesa una semilla desde el servicio CrSeed.jws.
+    #     """
+    #     seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
+    #     soap_request = """
+    #     <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+    #         <soapenv:Header/>
+    #         <soapenv:Body>
+    #             <getSeed/>
+    #         </soapenv:Body>
+    #     </soapenv:Envelope>
+    #     """
+    #     # Enviar solicitud SOAP
+    #     response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
+
+    #     # Parsear la respuesta SOAP
+    #     response_root = etree.fromstring(response_data.encode('utf-8'))
+    #     ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+
+    #     # Extraer el nodo getSeedReturn
+    #     get_seed_return = response_root.find('.//soapenv:Body//getSeedResponse//getSeedReturn', namespaces=ns)
+    #     if get_seed_return is None or not get_seed_return.text:
+    #         raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta SOAP.")
+
+    #     # Desescapar contenido
+    #     unescaped_content = html.unescape(get_seed_return.text)
+    #     decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
+
+    #     # Buscar RESP_BODY con namespace
+    #     sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
+    #     resp_body_node = decoded_response.find('.//SII:RESP_BODY', namespaces=sii_ns)
+    #     if resp_body_node is None:
+    #         raise UserError("No se encontró el nodo 'RESP_BODY' con prefijo SII.")
+
+    #     # Dentro de RESP_BODY, buscar SEMILLA (sin namespace)
+    #     seed_node = resp_body_node.find('SEMILLA')
+    #     if seed_node is None or not seed_node.text:
+    #         raise UserError("No se encontró el nodo 'SEMILLA' en el XML procesado.")
+
+    #     return seed_node.text
+
+    # def _sign_seed(self, seed):
+    #     """
+    #     Firma la semilla utilizando el certificado configurado y devuelve el XML firmado
+    #     en el formato que exige el SII (sin prefijo ds:, sin cabeceras PEM, y sin <?xml ...>).
+    #     """
+    #     try:
+    #         # 1) Obtener y validar el certificado activo
+    #         certificate = self._get_active_certificate()
+    #         if not certificate.signature_key_file or not certificate.signature_pass_phrase:
+    #             raise UserError("El certificado configurado no es válido o falta la contraseña.")
+
+    #         # 2) Cargar el PKCS12
+    #         pfx_data = base64.b64decode(certificate.signature_key_file)
+    #         p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
+
+    #         # 3) Extraer clave privada
+    #         private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
+    #         private_key = load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+
+    #         # 4) Extraer certificado en PEM, quitar BEGIN/END y saltos de línea para dejar solo Base64
+    #         public_cert_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
+    #         public_cert_pem_str = public_cert_pem.decode('utf-8')
+    #         public_cert_pem_str = public_cert_pem_str.replace("-----BEGIN CERTIFICATE-----", "")
+    #         public_cert_pem_str = public_cert_pem_str.replace("-----END CERTIFICATE-----", "")
+    #         public_cert_pem_str = public_cert_pem_str.replace("\n", "").strip()
+    #         x509_cert_b64 = public_cert_pem_str  # Esto es solo el contenido base64 del certificado
+
+    #         # -------------------- Construir el XML <getToken> --------------------
+    #         # <getToken>
+    #         get_token = etree.Element("getToken")
+
+    #         # <item><Semilla>...</Semilla></item>
+    #         item = etree.SubElement(get_token, "item")
+    #         etree.SubElement(item, "Semilla").text = seed
+
+    #         # <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    #         signature_node = etree.Element("Signature", nsmap={None: "http://www.w3.org/2000/09/xmldsig#"})
+
+    #         # <SignedInfo>
+    #         signed_info = etree.SubElement(signature_node, "SignedInfo")
+    #         etree.SubElement(
+    #             signed_info,
+    #             "CanonicalizationMethod",
+    #             Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
+    #         )
+    #         etree.SubElement(
+    #             signed_info,
+    #             "SignatureMethod",
+    #             Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+    #         )
+    #         reference = etree.SubElement(signed_info, "Reference", URI="")
+    #         transforms = etree.SubElement(reference, "Transforms")
+    #         etree.SubElement(
+    #             transforms,
+    #             "Transform",
+    #             Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"
+    #         )
+    #         etree.SubElement(
+    #             reference,
+    #             "DigestMethod",
+    #             Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"
+    #         )
+
+    #         # Calcular <DigestValue> de la semilla
+    #         digest = hashlib.sha1(seed.encode('utf-8')).digest()
+    #         digest_value = base64.b64encode(digest).decode('utf-8')
+    #         etree.SubElement(reference, "DigestValue").text = digest_value
+
+    #         # Firmar <SignedInfo>
+    #         signed_info_c14n = etree.tostring(
+    #             signed_info,
+    #             method="c14n",
+    #             exclusive=True,
+    #             with_comments=False
+    #         )
+    #         signature = private_key.sign(
+    #             signed_info_c14n,
+    #             padding.PKCS1v15(),
+    #             hashes.SHA1()
+    #         )
+    #         signature_value = base64.b64encode(signature).decode('utf-8')
+
+    #         # <SignatureValue> con la firma resultante
+    #         etree.SubElement(signature_node, "SignatureValue").text = signature_value
+
+    #         # <KeyInfo><KeyValue><RSAKeyValue><Modulus> + <Exponent>
+    #         key_info = etree.SubElement(signature_node, "KeyInfo")
+    #         key_value = etree.SubElement(key_info, "KeyValue")
+    #         rsa_key_value = etree.SubElement(key_value, "RSAKeyValue")
+
+    #         # Modulus
+    #         modulus = base64.b64encode(
+    #             private_key.private_numbers().public_numbers.n.to_bytes(
+    #                 (private_key.private_numbers().public_numbers.n.bit_length() + 7) // 8,
+    #                 byteorder="big"
+    #             )
+    #         ).decode('utf-8')
+    #         etree.SubElement(rsa_key_value, "Modulus").text = modulus
+
+    #         # Exponent
+    #         exponent = base64.b64encode(
+    #             private_key.private_numbers().public_numbers.e.to_bytes(
+    #                 (private_key.private_numbers().public_numbers.e.bit_length() + 7) // 8,
+    #                 byteorder="big"
+    #             )
+    #         ).decode('utf-8')
+    #         etree.SubElement(rsa_key_value, "Exponent").text = exponent
+
+    #         # <X509Data><X509Certificate>
+    #         x509_data = etree.SubElement(key_info, "X509Data")
+    #         etree.SubElement(x509_data, "X509Certificate").text = x509_cert_b64
+
+    #         # Insertar el nodo <Signature> en <getToken>
+    #         get_token.append(signature_node)
+
+    #         # Convertir a string, sin <?xml ?> (xml_declaration=False)
+    #         signed_xml = etree.tostring(
+    #             get_token,
+    #             pretty_print=True,
+    #             encoding="UTF-8",
+    #             xml_declaration=False
+    #         ).decode('utf-8')
+
+    #         _logger.info("Semilla firmada correctamente (sin prefijo ds:, sin cabeceras PEM).")
+    #         return signed_xml
+
+    #     except Exception as e:
+    #         _logger.error(f"Error al firmar la semilla: {e}")
+    #         raise UserError(f"Error al firmar la semilla: {e}")
+
+    def _get_token_from_internal_api(self):
         """
-        Obtiene y procesa una semilla desde el servicio CrSeed.jws.
+        Invoca tu API interna para obtener el token del SII.
+        1) Primero obtienes el token interno (login) si hace falta.
+        2) Luego invocas la URL de tu API que retorna el token del SII.
+        3) Retorna ese token final en texto plano.
         """
-        seed_url = "https://palena.sii.cl/DTEWS/CrSeed.jws"
-        soap_request = """
-        <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-            <soapenv:Header/>
-            <soapenv:Body>
-                <getSeed/>
-            </soapenv:Body>
-        </soapenv:Envelope>
-        """
-        # Enviar solicitud SOAP
-        response_data = self._send_soap_request(seed_url, soap_request, 'urn:getSeed')
+        # Ejemplo de estructura (adáptala a tu caso real):
+        api_login_url = "http://192.168.100.125:9000/api/login"
+        api_token_url = "http://192.168.100.125:9000/api/facturacion/obtenerTokenSII"
 
-        # Parsear la respuesta SOAP
-        response_root = etree.fromstring(response_data.encode('utf-8'))
-        ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
+        # 1) Hacer login y obtener token interno
+        login_payload = {
+            'email': 'odoo@holdconet.cl',
+            'password': '0DO0$2024H'
+        }
+        response_login = requests.post(api_login_url, json=login_payload, timeout=30)
+        if response_login.status_code != 200:
+            raise UserError(f"Error al hacer login en la API interna: {response_login.text}")
+        login_data = response_login.json()
+        internal_token = login_data.get('access_token')
+        if not internal_token:
+            raise UserError("No se obtuvo el token interno de la API.")
 
-        # Extraer el nodo getSeedReturn
-        get_seed_return = response_root.find('.//soapenv:Body//getSeedResponse//getSeedReturn', namespaces=ns)
-        if get_seed_return is None or not get_seed_return.text:
-            raise UserError("No se encontró el nodo 'getSeedReturn' en la respuesta SOAP.")
+        # 2) Llamar a la ruta de tu API para pedir el token del SII
+        headers = {'Authorization': f"Bearer {internal_token}"}
+        response_token = requests.post(api_token_url, headers=headers, timeout=30)
+        if response_token.status_code != 200:
+            raise UserError(f"Error al pedir token del SII a la API interna: {response_token.text}")
 
-        # Desescapar contenido
-        unescaped_content = html.unescape(get_seed_return.text)
-        decoded_response = etree.fromstring(unescaped_content.encode('utf-8'))
-
-        # Buscar RESP_BODY con namespace
-        sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
-        resp_body_node = decoded_response.find('.//SII:RESP_BODY', namespaces=sii_ns)
-        if resp_body_node is None:
-            raise UserError("No se encontró el nodo 'RESP_BODY' con prefijo SII.")
-
-        # Dentro de RESP_BODY, buscar SEMILLA (sin namespace)
-        seed_node = resp_body_node.find('SEMILLA')
-        if seed_node is None or not seed_node.text:
-            raise UserError("No se encontró el nodo 'SEMILLA' en el XML procesado.")
-
-        return seed_node.text
-
-    def _sign_seed(self, seed):
-        """
-        Firma la semilla utilizando el certificado configurado y devuelve el XML firmado
-        en el formato que exige el SII (sin prefijo ds:, sin cabeceras PEM, y sin <?xml ...>).
-        """
-        try:
-            # 1) Obtener y validar el certificado activo
-            certificate = self._get_active_certificate()
-            if not certificate.signature_key_file or not certificate.signature_pass_phrase:
-                raise UserError("El certificado configurado no es válido o falta la contraseña.")
-
-            # 2) Cargar el PKCS12
-            pfx_data = base64.b64decode(certificate.signature_key_file)
-            p12 = crypto.load_pkcs12(pfx_data, certificate.signature_pass_phrase.encode('utf-8'))
-
-            # 3) Extraer clave privada
-            private_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, p12.get_privatekey())
-            private_key = load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-
-            # 4) Extraer certificado en PEM, quitar BEGIN/END y saltos de línea para dejar solo Base64
-            public_cert_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, p12.get_certificate())
-            public_cert_pem_str = public_cert_pem.decode('utf-8')
-            public_cert_pem_str = public_cert_pem_str.replace("-----BEGIN CERTIFICATE-----", "")
-            public_cert_pem_str = public_cert_pem_str.replace("-----END CERTIFICATE-----", "")
-            public_cert_pem_str = public_cert_pem_str.replace("\n", "").strip()
-            x509_cert_b64 = public_cert_pem_str  # Esto es solo el contenido base64 del certificado
-
-            # -------------------- Construir el XML <getToken> --------------------
-            # <getToken>
-            get_token = etree.Element("getToken")
-
-            # <item><Semilla>...</Semilla></item>
-            item = etree.SubElement(get_token, "item")
-            etree.SubElement(item, "Semilla").text = seed
-
-            # <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-            signature_node = etree.Element("Signature", nsmap={None: "http://www.w3.org/2000/09/xmldsig#"})
-
-            # <SignedInfo>
-            signed_info = etree.SubElement(signature_node, "SignedInfo")
-            etree.SubElement(
-                signed_info,
-                "CanonicalizationMethod",
-                Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
-            )
-            etree.SubElement(
-                signed_info,
-                "SignatureMethod",
-                Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"
-            )
-            reference = etree.SubElement(signed_info, "Reference", URI="")
-            transforms = etree.SubElement(reference, "Transforms")
-            etree.SubElement(
-                transforms,
-                "Transform",
-                Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"
-            )
-            etree.SubElement(
-                reference,
-                "DigestMethod",
-                Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"
-            )
-
-            # Calcular <DigestValue> de la semilla
-            digest = hashlib.sha1(seed.encode('utf-8')).digest()
-            digest_value = base64.b64encode(digest).decode('utf-8')
-            etree.SubElement(reference, "DigestValue").text = digest_value
-
-            # Firmar <SignedInfo>
-            signed_info_c14n = etree.tostring(
-                signed_info,
-                method="c14n",
-                exclusive=True,
-                with_comments=False
-            )
-            signature = private_key.sign(
-                signed_info_c14n,
-                padding.PKCS1v15(),
-                hashes.SHA1()
-            )
-            signature_value = base64.b64encode(signature).decode('utf-8')
-
-            # <SignatureValue> con la firma resultante
-            etree.SubElement(signature_node, "SignatureValue").text = signature_value
-
-            # <KeyInfo><KeyValue><RSAKeyValue><Modulus> + <Exponent>
-            key_info = etree.SubElement(signature_node, "KeyInfo")
-            key_value = etree.SubElement(key_info, "KeyValue")
-            rsa_key_value = etree.SubElement(key_value, "RSAKeyValue")
-
-            # Modulus
-            modulus = base64.b64encode(
-                private_key.private_numbers().public_numbers.n.to_bytes(
-                    (private_key.private_numbers().public_numbers.n.bit_length() + 7) // 8,
-                    byteorder="big"
-                )
-            ).decode('utf-8')
-            etree.SubElement(rsa_key_value, "Modulus").text = modulus
-
-            # Exponent
-            exponent = base64.b64encode(
-                private_key.private_numbers().public_numbers.e.to_bytes(
-                    (private_key.private_numbers().public_numbers.e.bit_length() + 7) // 8,
-                    byteorder="big"
-                )
-            ).decode('utf-8')
-            etree.SubElement(rsa_key_value, "Exponent").text = exponent
-
-            # <X509Data><X509Certificate>
-            x509_data = etree.SubElement(key_info, "X509Data")
-            etree.SubElement(x509_data, "X509Certificate").text = x509_cert_b64
-
-            # Insertar el nodo <Signature> en <getToken>
-            get_token.append(signature_node)
-
-            # Convertir a string, sin <?xml ?> (xml_declaration=False)
-            signed_xml = etree.tostring(
-                get_token,
-                pretty_print=True,
-                encoding="UTF-8",
-                xml_declaration=False
-            ).decode('utf-8')
-
-            _logger.info("Semilla firmada correctamente (sin prefijo ds:, sin cabeceras PEM).")
-            return signed_xml
-
-        except Exception as e:
-            _logger.error(f"Error al firmar la semilla: {e}")
-            raise UserError(f"Error al firmar la semilla: {e}")
+        token_data = response_token.json()
+        sii_token = token_data.get('sii_token')
+        if not sii_token:
+            raise UserError("No se obtuvo el token del SII desde la API interna.")
+        return sii_token
 
 
-
-        
-
-   
-   
     def _get_token(self, signed_seed):
         """
         Intercambio de semilla firmada por Token con el SII.
@@ -613,8 +644,7 @@ class InvoiceMail(models.Model):
     def check_sii_status(self):
         """
         Consulta el estado del DTE en el SII y registra los XML generados en el Chatter.
-        Toma el RUT consultante (quien firma y envía) desde self.env.company.vat
-        y asume que coincide con RutCompania. El RUT Receptor se lee de self.partner_rut.
+        AHORA se basa en la API interna para obtener el token SII, en lugar de firmar la semilla.
         """
         self.ensure_one()
         try:
@@ -623,18 +653,16 @@ class InvoiceMail(models.Model):
                 f"TipoDoc: {self.document_type.code}, Folio: {self.folio_number}"
             )
 
-            # --------------------------------------------------------------------------------
-            # RUT consultante y RUT compañía: tomados desde la compañía principal de Odoo
-            # --------------------------------------------------------------------------------
+            # Verificamos que exista un RUT principal en la compañía
             if not self.env.company.vat:
                 raise UserError("No se ha definido el RUT de la compañía principal en Odoo.")
 
+            # Ajustar lógicas de extracción de rut
             rut_consultante = self.env.company.vat[:-2]
             dv_consultante = self.env.company.vat[-1]
             rut_compania = rut_consultante
             dv_compania = dv_consultante
 
-            # RUT receptor (tomado desde la factura)
             if not self.partner_rut:
                 raise UserError("No existe RUT receptor en esta factura.")
             rut_receptor = self.partner_rut[:-2]
@@ -643,20 +671,11 @@ class InvoiceMail(models.Model):
             if not self.date_emission:
                 raise UserError("La factura no tiene Fecha de Emisión (date_emission).")
 
-            # 1) Obtener la semilla
-            seed = self._get_seed()
-            self.post_xml_to_chatter(seed, description="Semilla Obtenida (Texto plano)")
-            _logger.info(f"Semilla obtenida: {seed}")
+            # 1) Pedir token a la API interna (en vez de firmar semilla)
+            token = self._get_token_from_internal_api()
+            _logger.info(f"Token obtenido correctamente (vía API interna): {token}")
 
-            # 2) Firmar la semilla
-            signed_seed = self._sign_seed(seed)
-            self.post_xml_to_chatter(signed_seed, description="Semilla Firmada (XML)")
-
-            # 3) Obtener el token
-            token = self._get_token(signed_seed)
-            _logger.info(f"Token obtenido correctamente: {token}")
-
-            # 4) Construir la solicitud SOAP para consultar estado del DTE
+            # 2) Construir la solicitud SOAP para consultar estado del DTE
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
                 <soapenv:Header/>
@@ -678,10 +697,10 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            # Registrar la solicitud en el Chatter
+            # Registrar la solicitud en el Chatter (opcional)
             self.post_xml_to_chatter(soap_request, description="Solicitud SOAP Consulta Estado DTE")
 
-            # 5) Enviar la solicitud
+            # 3) Enviar la solicitud
             status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
             response_data = self._send_soap_request(status_url, soap_request, '')
 
@@ -689,7 +708,7 @@ class InvoiceMail(models.Model):
             self.post_xml_to_chatter(response_data, description="Respuesta SOAP Consulta Estado DTE")
             _logger.info(f"Respuesta de estado DTE: {response_data}")
 
-            # 6) Parsear la respuesta
+            # 4) Parsear la respuesta
             response_root = etree.fromstring(response_data)
             namespaces = {
                 'SII': 'http://www.sii.cl/XMLSchema',
@@ -697,13 +716,12 @@ class InvoiceMail(models.Model):
             }
             estado_element = response_root.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=namespaces)
             estado = estado_element.text if estado_element is not None else 'unknown'
-
             glosa_element = response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=namespaces)
             glosa = glosa_element.text if glosa_element is not None else ''
 
             _logger.info(f"SII respondió ESTADO={estado}, GLOSA={glosa}")
 
-            # 7) Actualizar el estado en este registro
+            # 5) Actualizar el estado en este registro
             if estado == '00':
                 self.l10n_cl_dte_status = 'accepted'
             elif estado in ['01','02','03','04','05','06','07','08','09','10','11','12','-3']:
@@ -722,6 +740,7 @@ class InvoiceMail(models.Model):
         except Exception as e:
             _logger.error(f"Error consultando el estado del DTE: {e}")
             raise UserError(f"Error consultando el estado del DTE en el SII: {e}")
+
 
 
     #def validate xml funcional ok
