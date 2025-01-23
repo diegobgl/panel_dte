@@ -392,16 +392,11 @@ class InvoiceMail(models.Model):
 
     def _get_token_from_internal_api(self):
         """
-        1) Hace login en la API interna (http://192.168.100.125:9000/api/login),
-           recibiendo un token de login.
-        2) Con ese token, llama a http://192.168.100.125:9000/api/facturacion/obtenerTokenSII
-           para obtener el token final del SII.
-        3) Retorna el token del SII.
+        Obtiene el token desde la API interna.
         """
-
         ICP = self.env['ir.config_parameter'].sudo()
 
-        # 1) Obtener la configuración desde Ajustes (res.config.settings)
+        # Obtener la configuración desde Ajustes
         api_login_url = ICP.get_param('my_module.api_login_url') or ''
         api_sii_token_url = ICP.get_param('my_module.api_sii_token_url') or ''
         email_api = ICP.get_param('my_module.api_user') or ''
@@ -411,13 +406,15 @@ class InvoiceMail(models.Model):
         if not api_login_url or not api_sii_token_url or not email_api or not pass_api:
             raise UserError(_("Falta configuración de la API interna. Revisa Ajustes."))
 
-        # 2) Hacer login para obtener el token de login
+        # Realizar la solicitud de login
         payload_login = {
-            'mail': email_api,      # Ajusta según tu API (podría ser 'username')
-            'password': pass_api
+            'email': email_api,
+            'password': pass_api,
         }
         try:
-            resp_login = requests.post(api_login_url, json=payload_login, timeout=30)
+            # Enviar los datos como `form-data`
+            _logger.info(f"Enviando solicitud de login a {api_login_url} con usuario {email_api}.")
+            resp_login = requests.post(api_login_url, data=payload_login, timeout=30)
         except requests.exceptions.RequestException as e:
             raise UserError(_("Error de conexión al hacer login en la API interna: %s") % str(e))
 
@@ -426,21 +423,19 @@ class InvoiceMail(models.Model):
                             (resp_login.status_code, resp_login.text))
 
         data_login = resp_login.json()
-        # Tu API te devuelve algo como:
-        # {
-        #   "token": "eyJ0eXAiOiJKV1QiLCJh...",
-        #   "token_type": "Bearer Token",
-        #   "expira": "2025-01-24 14:13:18"
-        # }
         login_token = data_login.get('token')
         if not login_token:
             raise UserError(_("No se obtuvo 'token' de la API interna en la etapa de login."))
 
-        # 3) Llamar a obtenerTokenSII usando el token del login
+        # Registrar en los logs para debug
+        _logger.info(f"Token de login obtenido: {login_token}")
+
+        # Solicitar el token SII usando el token de login
         headers = {
             'Authorization': f"Bearer {login_token}"
         }
         try:
+            _logger.info(f"Solicitando token SII a {api_sii_token_url}.")
             resp_sii = requests.post(api_sii_token_url, headers=headers, timeout=30)
         except requests.exceptions.RequestException as e:
             raise UserError(_("Error de conexión al pedir token SII: %s") % str(e))
@@ -450,17 +445,13 @@ class InvoiceMail(models.Model):
                             (resp_sii.status_code, resp_sii.text))
 
         data_sii = resp_sii.json()
-        # Tu API debería devolver algo como: 
-        # {
-        #   "sii_token": "wZabc123...",
-        #   ...
-        # }
-        # Ajusta según tu respuesta real
         sii_token = data_sii.get('sii_token')
         if not sii_token:
             raise UserError(_("No se obtuvo 'sii_token' de la API interna."))
 
-        # Retornar el token final del SII
+        # Registrar en los logs para debug
+        _logger.info(f"Token SII obtenido: {sii_token}")
+
         return sii_token
 
 
