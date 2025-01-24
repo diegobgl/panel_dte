@@ -392,66 +392,51 @@ class InvoiceMail(models.Model):
 
     def _get_token_from_internal_api(self):
         """
-        Obtiene el token desde la API interna.
+        Obtiene el token SII desde la API interna en dos pasos:
+        1. Realiza login con usuario y contraseña para obtener un token interno.
+        2. Usa el token interno para solicitar el token del SII.
         """
         ICP = self.env['ir.config_parameter'].sudo()
 
-        # Obtener la configuración desde Ajustes
+        # Configuración
         api_login_url = ICP.get_param('my_module.api_login_url') or ''
         api_sii_token_url = ICP.get_param('my_module.api_sii_token_url') or ''
         email_api = ICP.get_param('my_module.api_user') or ''
         pass_api = ICP.get_param('my_module.api_pass') or ''
 
-        # Validar que tengamos todo para la conexión
         if not api_login_url or not api_sii_token_url or not email_api or not pass_api:
             raise UserError(_("Falta configuración de la API interna. Revisa Ajustes."))
 
-        # Realizar la solicitud de login
-        payload_login = {
-            'email': email_api,
-            'password': pass_api,
-        }
+        # Paso 1: Login y obtención del token interno
+        login_payload = {'email': email_api, 'password': pass_api}
         try:
-            # Enviar los datos como `form-data`
-            _logger.info(f"Enviando solicitud de login a {api_login_url} con usuario {email_api}.")
-            resp_login = requests.post(api_login_url, data=payload_login, timeout=30)
+            _logger.info(f"Iniciando login en {api_login_url} con usuario {email_api}.")
+            login_response = requests.post(api_login_url, data=login_payload, timeout=30)
+            login_response.raise_for_status()
         except requests.exceptions.RequestException as e:
             raise UserError(_("Error de conexión al hacer login en la API interna: %s") % str(e))
 
-        if resp_login.status_code != 200:
-            raise UserError(_("Error en login. Respuesta HTTP: %s\nDetalle: %s") %
-                            (resp_login.status_code, resp_login.text))
+        login_data = login_response.json()
+        internal_token = login_data.get('token')  # Extraer el token interno
+        if not internal_token:
+            raise UserError(_("No se obtuvo un token válido en la etapa de login."))
+        _logger.info(f"Token interno obtenido correctamente: {internal_token[:5]}***")
 
-        data_login = resp_login.json()
-        login_token = data_login.get('token')
-        if not login_token:
-            raise UserError(_("No se obtuvo 'token' de la API interna en la etapa de login."))
-
-        # Registrar en los logs para debug
-        _logger.info(f"Token de login obtenido: {login_token}")
-
-        # Solicitar el token SII usando el token de login
-        headers = {
-            'Authorization': f"Bearer {login_token}"
-        }
+        # Paso 2: Solicitud del token del SII
+        headers = {'Authorization': f"Bearer {internal_token}"}
         try:
             _logger.info(f"Solicitando token SII a {api_sii_token_url}.")
-            resp_sii = requests.post(api_sii_token_url, headers=headers, timeout=30)
+            sii_response = requests.post(api_sii_token_url, headers=headers, timeout=30)
+            sii_response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            raise UserError(_("Error de conexión al pedir token SII: %s") % str(e))
+            raise UserError(_("Error de conexión al pedir el token SII: %s") % str(e))
 
-        if resp_sii.status_code != 200:
-            raise UserError(_("Error al pedir token SII. Respuesta HTTP: %s\nDetalle: %s") %
-                            (resp_sii.status_code, resp_sii.text))
-
-        data_sii = resp_sii.json()
-        sii_token = data_sii.get('sii_token')
+        sii_data = sii_response.json()
+        sii_token = sii_data.get('success', {}).get('descripcionRespuesta', {}).get('token')
         if not sii_token:
-            raise UserError(_("No se obtuvo 'sii_token' de la API interna."))
+            raise UserError(_("No se pudo extraer el token SII de la respuesta de la API interna."))
 
-        # Registrar en los logs para debug
-        _logger.info(f"Token SII obtenido: {sii_token}")
-
+        _logger.info(f"Token SII obtenido correctamente: {sii_token[:5]}***")
         return sii_token
 
 
