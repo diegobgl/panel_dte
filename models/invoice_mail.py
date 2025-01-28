@@ -622,7 +622,7 @@ class InvoiceMail(models.Model):
                         <DvReceptor>{dv_receptor}</DvReceptor>
                         <TipoDte>{document_type_code}</TipoDte>
                         <FolioDte>{document_number}</FolioDte>
-                        <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
+                        <FechaEmisionDte>{date_emission.strftime('%d-%m-%Y')}</FechaEmisionDte>
                         <MontoDte>{int(amount_total)}</MontoDte>
                         <Token>{token}</Token>
                     </dte:getEstDte>
