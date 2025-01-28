@@ -445,11 +445,11 @@ class InvoiceMail(models.Model):
                             (resp_sii.status_code, resp_sii.text))
 
         data_sii = resp_sii.json()
-        sii_token = data_sii.get('sii_token')
-        if not sii_token:
-            raise UserError(_("No se obtuvo 'sii_token' de la API interna."))
+        sii_token = data_sii.get('success', {}).get('descripcionRespuesta', {}).get('token')
 
-        # Registrar en los logs para debug
+        if not sii_token:
+            raise UserError(_("No se obtuvo 'token' de la API interna (ruta success.descripcionRespuesta.token)."))
+
         _logger.info(f"Token SII obtenido: {sii_token}")
 
         return sii_token
