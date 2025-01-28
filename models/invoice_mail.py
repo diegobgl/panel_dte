@@ -695,8 +695,9 @@ class InvoiceMail(models.Model):
     # -------------------------------------------------------------------------
     def check_sii_status(self):
         """
-        Consulta el estado del DTE en el SII y registra los XML generados en el Chatter.
-        AHORA se basa en la API interna para obtener el token SII, en lugar de firmar la semilla.
+        Consulta el estado del DTE en el SII y registra los XML generados en el Chatter,
+        tomando a rut_compania desde company_rut (emisor) y rut_consultante/receptor
+        desde la empresa principal en Odoo.
         """
         self.ensure_one()
         try:
@@ -705,29 +706,29 @@ class InvoiceMail(models.Model):
                 f"TipoDoc: {self.document_type.code}, Folio: {self.folio_number}"
             )
 
-            # Verificamos que exista un RUT principal en la compañía
+            # 1) Validar que tengas la info necesaria
             if not self.env.company.vat:
-                raise UserError("No se ha definido el RUT de la compañía principal en Odoo.")
+                raise UserError("No se ha definido el RUT de tu compañía principal (env.company.vat).")
 
-            # Ajustar lógicas de extracción de rut
-            rut_consultante = self.env.company.vat[:-2]
-            dv_consultante = self.env.company.vat[-1]
-            rut_compania = rut_consultante
-            dv_compania = dv_consultante
-
-            if not self.partner_rut:
-                raise UserError("No existe RUT receptor en esta factura.")
-            rut_receptor = self.partner_rut[:-2]
-            dv_receptor = self.partner_rut[-1]
+            if not self.company_rut:
+                raise UserError("No existe RUT Emisor en el campo company_rut.")
 
             if not self.date_emission:
                 raise UserError("La factura no tiene Fecha de Emisión (date_emission).")
 
-            # 1) Pedir token a la API interna (en vez de firmar semilla)
+            # 2) Preparar datos para la consulta
+            #    - Emisor = company_rut (desde el XML)
+            #    - Consultante/Receptor = tu compañía (env.company.vat)
+            rut_consultante, dv_consultante = self._split_vat(self.env.company.vat)
+            rut_compania, dv_compania = self._split_vat(self.company_rut)
+            # En un DTE recibido, Receptor es tu propio RUT
+            rut_receptor, dv_receptor = rut_consultante, dv_consultante
+
+            # 3) Obtener token SII desde tu API interna
             token = self._get_token_from_internal_api()
             _logger.info(f"Token obtenido correctamente (vía API interna): {token}")
 
-            # 2) Construir la solicitud SOAP para consultar estado del DTE
+            # 4) Armar solicitud SOAP
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
                 <soapenv:Header/>
@@ -749,23 +750,19 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            # Registrar la solicitud en el Chatter (opcional)
             self.post_xml_to_chatter(soap_request, description="Solicitud SOAP Consulta Estado DTE")
-
-            # 3) Enviar la solicitud
             status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
+
+            # 5) Enviar la solicitud
             response_data = self._send_soap_request(status_url, soap_request, '')
 
             # Guardar la respuesta en el Chatter
             self.post_xml_to_chatter(response_data, description="Respuesta SOAP Consulta Estado DTE")
             _logger.info(f"Respuesta de estado DTE: {response_data}")
 
-            # 4) Parsear la respuesta
-            response_root = etree.fromstring(response_data)
-            namespaces = {
-                'SII': 'http://www.sii.cl/XMLSchema',
-                'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'
-            }
+            # 6) Parsear la respuesta para extraer <ESTADO> y <GLOSA>
+            response_root = etree.fromstring(response_data.encode('utf-8'), etree.XMLParser(recover=True))
+            namespaces = {'SII': 'http://www.sii.cl/XMLSchema', 'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/'}
             estado_element = response_root.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=namespaces)
             estado = estado_element.text if estado_element is not None else 'unknown'
             glosa_element = response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=namespaces)
@@ -773,7 +770,7 @@ class InvoiceMail(models.Model):
 
             _logger.info(f"SII respondió ESTADO={estado}, GLOSA={glosa}")
 
-            # 5) Actualizar el estado en este registro
+            # 7) Actualizar el estado en Odoo
             if estado == '00':
                 self.l10n_cl_dte_status = 'accepted'
             elif estado in ['01','02','03','04','05','06','07','08','09','10','11','12','-3']:
@@ -781,7 +778,6 @@ class InvoiceMail(models.Model):
             else:
                 self.l10n_cl_dte_status = 'ask_for_status'
 
-            # Mensaje final en chatter
             self.message_post(
                 body=f"Estado del DTE consultado: {estado} - {glosa}",
                 subject="Consulta de Estado DTE",
