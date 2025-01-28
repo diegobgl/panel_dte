@@ -392,53 +392,74 @@ class InvoiceMail(models.Model):
 
     def _get_token_from_internal_api(self):
         """
-        Obtiene el token SII desde la API interna en dos pasos:
-        1. Realiza login con usuario y contraseña para obtener un token interno.
-        2. Usa el token interno para solicitar el token del SII.
+        Obtiene el token desde la API interna.
         """
         ICP = self.env['ir.config_parameter'].sudo()
 
-        # Configuración
+        # Obtener la configuración desde Ajustes
         api_login_url = ICP.get_param('my_module.api_login_url') or ''
         api_sii_token_url = ICP.get_param('my_module.api_sii_token_url') or ''
         email_api = ICP.get_param('my_module.api_user') or ''
         pass_api = ICP.get_param('my_module.api_pass') or ''
 
+        # Validar que tengamos todo para la conexión
         if not api_login_url or not api_sii_token_url or not email_api or not pass_api:
             raise UserError(_("Falta configuración de la API interna. Revisa Ajustes."))
 
-        # Paso 1: Login y obtención del token interno
-        login_payload = {'email': email_api, 'password': pass_api}
+        # Realizar la solicitud de login
+        payload_login = {
+            'email': email_api,
+            'password': pass_api,
+        }
         try:
-            _logger.info(f"Iniciando login en {api_login_url} con usuario {email_api}.")
-            login_response = requests.post(api_login_url, data=login_payload, timeout=30)
-            login_response.raise_for_status()
+            # Enviar los datos como `form-data`
+            _logger.info(f"Enviando solicitud de login a {api_login_url} con usuario {email_api}.")
+            resp_login = requests.post(api_login_url, data=payload_login, timeout=30)
         except requests.exceptions.RequestException as e:
             raise UserError(_("Error de conexión al hacer login en la API interna: %s") % str(e))
 
-        login_data = login_response.json()
-        internal_token = login_data.get('token')  # Extraer el token interno
-        if not internal_token:
-            raise UserError(_("No se obtuvo un token válido en la etapa de login."))
-        _logger.info(f"Token interno obtenido correctamente: {internal_token[:5]}***")
+        if resp_login.status_code != 200:
+            raise UserError(_("Error en login. Respuesta HTTP: %s\nDetalle: %s") %
+                            (resp_login.status_code, resp_login.text))
 
-        # Paso 2: Solicitud del token del SII
-        headers = {'Authorization': f"Bearer {internal_token}"}
+        data_login = resp_login.json()
+        login_token = data_login.get('token')
+        if not login_token:
+            raise UserError(_("No se obtuvo 'token' de la API interna en la etapa de login."))
+
+        # Registrar en los logs para debug
+        _logger.info(f"Token de login obtenido: {login_token}")
+
+        # Solicitar el token SII usando el token de login
+        headers = {
+            'Authorization': f"Bearer {login_token}"
+        }
         try:
             _logger.info(f"Solicitando token SII a {api_sii_token_url}.")
-            sii_response = requests.post(api_sii_token_url, headers=headers, timeout=30)
-            sii_response.raise_for_status()
+            resp_sii = requests.post(api_sii_token_url, headers=headers, timeout=30)
         except requests.exceptions.RequestException as e:
-            raise UserError(_("Error de conexión al pedir el token SII: %s") % str(e))
+            raise UserError(_("Error de conexión al pedir token SII: %s") % str(e))
 
-        sii_data = sii_response.json()
-        sii_token = sii_data.get('success', {}).get('descripcionRespuesta', {}).get('token')
+        if resp_sii.status_code != 200:
+            raise UserError(_("Error al pedir token SII. Respuesta HTTP: %s\nDetalle: %s") %
+                            (resp_sii.status_code, resp_sii.text))
+
+        data_sii = resp_sii.json()
+        sii_token = data_sii.get('sii_token')
         if not sii_token:
-            raise UserError(_("No se pudo extraer el token SII de la respuesta de la API interna."))
+            raise UserError(_("No se obtuvo 'sii_token' de la API interna."))
 
-        _logger.info(f"Token SII obtenido correctamente: {sii_token[:5]}***")
+        # Registrar en los logs para debug
+        _logger.info(f"Token SII obtenido: {sii_token}")
+
         return sii_token
 
+    def _split_vat(self, vat_string):
+        """
+        Recibe un RUT completo '12345678-9' (con o sin puntos) y retorna (rut, dv).
+        """
+        rut_clean = vat_string.replace('.', '').replace('-', '')
+        return rut_clean[:-1], rut_clean[-1]
 
     def _get_token(self, signed_seed):
         """
@@ -559,88 +580,105 @@ class InvoiceMail(models.Model):
 
 
     # get dte claim funcional ok
-    def _get_dte_claim(self, company_vat, digital_signature, document_type_code, document_number, date_emission, amount_total):
-        """Consultar estado del DTE en SII usando urllib3."""
+    def _get_dte_claim(self, emitter_vat, document_type_code, document_number, date_emission, amount_total):
+        """
+        Consultar estado del DTE en SII (documento que hemos recibido).
+        - emitter_vat: RUT completo del Emisor (ej. '12345678-9')
+        - document_type_code: Ej. '33'
+        - document_number: Folio del DTE
+        - date_emission: Fecha datetime/date en Odoo
+        - amount_total: Monto total del DTE
+        """
         try:
-            # URL del servicio SOAP
-            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
+            # 1) Preparar RUT consultante y receptor (tu misma empresa, pues recibes el DTE).
+            if not self.env.company.vat:
+                raise UserError("No está configurado el RUT de la compañía en Odoo.")
+            rut_consultante, dv_consultante = self._split_vat(self.env.company.vat)
+            rut_receptor, dv_receptor = rut_consultante, dv_consultante  # Mismo RUT si documento es recibido
 
-            # Generar un nuevo token antes de la consulta
-            _logger.info("Generando token para la consulta del DTE.")
-            token = self.env['l10n_cl.edi.util']._get_token('SII', digital_signature)
+            # 2) Preparar RUT compañía emisora (desde 'emitter_vat').
+            if not emitter_vat:
+                raise UserError("No se proporcionó el RUT del Emisor para la consulta.")
+            rut_compania, dv_compania = self._split_vat(emitter_vat)
+
+            # 3) Obtener token de la API interna (o del método que uses para firmar semilla).
+            _logger.info("Obteniendo token para la consulta del DTE...")
+            token = self._get_token_from_internal_api()
             if not token:
-                raise UserError("No se pudo generar un token válido para la consulta al SII.")
+                raise UserError("No se pudo obtener un token válido para la consulta al SII.")
 
-            # Separar RUT y dígito verificador
-            rut_emisor = str(company_vat[:-2])
-            dv_emisor = str(company_vat[-1])
-            rut_receptor = str(self.partner_rut[:-2])
-            dv_receptor = str(self.partner_rut[-1])
-            rut_consultante = str(company_vat[:-2])
-            dv_consultante = str(company_vat[-1])
-
-            # Crear el cuerpo del XML para la solicitud SOAP
+            # 4) Construir la solicitud SOAP
+            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
-            <soapenv:Header/>
-            <soapenv:Body>
-                <dte:getEstDte>
-                    <RutConsultante>{rut_consultante}</RutConsultante>
-                    <DvConsultante>{dv_consultante}</DvConsultante>
-                    <RutCompania>{rut_emisor}</RutCompania>
-                    <DvCompania>{dv_emisor}</DvCompania>
-                    <RutReceptor>{rut_receptor}</RutReceptor>
-                    <DvReceptor>{dv_receptor}</DvReceptor>
-                    <TipoDte>{document_type_code}</TipoDte>
-                    <FolioDte>{document_number}</FolioDte>
-                    <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
-                    <MontoDte>{int(amount_total)}</MontoDte>
-                    <Token>{token}</Token>
-                </dte:getEstDte>
-            </soapenv:Body>
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <dte:getEstDte>
+                        <RutConsultante>{rut_consultante}</RutConsultante>
+                        <DvConsultante>{dv_consultante}</DvConsultante>
+                        <RutCompania>{rut_compania}</RutCompania>
+                        <DvCompania>{dv_compania}</DvCompania>
+                        <RutReceptor>{rut_receptor}</RutReceptor>
+                        <DvReceptor>{dv_receptor}</DvReceptor>
+                        <TipoDte>{document_type_code}</TipoDte>
+                        <FolioDte>{document_number}</FolioDte>
+                        <FechaEmisionDte>{date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
+                        <MontoDte>{int(amount_total)}</MontoDte>
+                        <Token>{token}</Token>
+                    </dte:getEstDte>
+                </soapenv:Body>
             </soapenv:Envelope>
             """
+            _logger.info(f"Enviando solicitud SOAP a {url}:\n{soap_request}")
 
-            _logger.info(f"Enviando solicitud al SII con los siguientes parámetros:\n{soap_request}")
-
-            # Configurar urllib3
+            # 5) Envío con urllib3
             http = urllib3.PoolManager()
             headers = {
                 'Content-Type': 'text/xml; charset=utf-8',
                 'SOAPAction': ''
             }
-
-            # Enviar la solicitud
-            response = http.request(
-                'POST',
-                url,
-                body=soap_request.encode('utf-8'),
-                headers=headers
-            )
-
-            # Validar el código de respuesta HTTP
+            response = http.request('POST', url, body=soap_request.encode('utf-8'), headers=headers)
             if response.status != 200:
-                _logger.error(f"Error HTTP al consultar el estado del DTE: {response.status}")
-                raise UserError(f"Error HTTP al consultar el estado del DTE: {response.status}")
+                raise UserError(f"Error HTTP {response.status} en consulta al SII: {response.data}")
 
-            # Parsear la respuesta SOAP
-            response_xml = etree.fromstring(response.data)
-            _logger.info(f"Respuesta completa del SII: {etree.tostring(response_xml, pretty_print=True).decode()}")
+            # 6) Parsear respuesta SOAP
+            #    OJO: La respuesta viene con un XML anidado dentro de <getEstDteReturn>
+            #    Debes extraer ese segundo XML real donde sale <ESTADO>, <ERR_CODE>, etc.
+            root_soap = etree.fromstring(response.data, etree.XMLParser(recover=True))
+            
+            # Buscar el tag <getEstDteReturn> que contiene el segundo XML en texto escapado
+            ns_soap = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/', 'ns1': 'http://DefaultNamespace'}
+            getEstDteReturn = root_soap.find('.//ns1:getEstDteReturn', namespaces=ns_soap)
+            if getEstDteReturn is None or not getEstDteReturn.text:
+                raise UserError("No se encontró <getEstDteReturn> con la respuesta del SII.")
 
-            # Extraer el estado del DTE desde la respuesta
-            ns = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-                'sii': 'http://www.sii.cl/XMLSchema'}
-            estado = response_xml.xpath('//sii:ESTADO', namespaces=ns)
-            glosa = response_xml.xpath('//sii:GLOSA', namespaces=ns)
+            # Des-escape para obtener XML interno
+            second_xml_unescaped = html.unescape(getEstDteReturn.text)
+            # Parseamos el segundo XML, quitando la cabecera <?xml ...> si diera conflicto
+            parser = etree.XMLParser(remove_encoding_decl=True, recover=True)
+            second_root = etree.fromstring(second_xml_unescaped.encode('utf-8'), parser=parser)
 
-            if estado and estado[0].text == '001':
-                _logger.error(f"Error del SII: {glosa[0].text if glosa else 'TOKEN NO EXISTE'}")
-                raise UserError(f"Error del SII: {glosa[0].text if glosa else 'TOKEN NO EXISTE'}")
+            # 7) Extraer datos: <ESTADO>, <ERR_CODE>, <GLOSA_ERR>, etc.
+            sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
+            estado_node = second_root.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
+            err_code_node = second_root.find('.//SII:RESP_HDR/SII:ERR_CODE', namespaces=sii_ns)
+            glosa_err_node = second_root.find('.//SII:RESP_HDR/SII:GLOSA_ERR', namespaces=sii_ns)
 
-            return estado[0].text if estado else None
+            estado = estado_node.text if estado_node is not None else ''
+            err_code = err_code_node.text if err_code_node is not None else ''
+            glosa_err = glosa_err_node.text if glosa_err_node is not None else ''
+
+            _logger.info(f"Respuesta SII => ESTADO: {estado}, ERR_CODE: {err_code}, GLOSA_ERR: {glosa_err}")
+
+            # 8) Manejo de la lógica de resultado
+            if err_code:
+                # Ejemplo: -1861 => "Error Interno"
+                raise UserError(f"Consulta SII con error. ERR_CODE: {err_code}, GLOSA_ERR: {glosa_err}")
+
+            return estado  # Retorna el código de estado SII (e.g. '0', '1', etc.)
 
         except Exception as e:
-            _logger.error(f"Error general al consultar el estado del DTE: {e}")
+            _logger.error(f"Error consultando el estado del DTE: {e}")
             raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
     
 

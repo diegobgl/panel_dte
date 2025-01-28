@@ -1,0 +1,18 @@
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <dte:getEstDte>
+                        <RutConsultante>77494541</RutConsultante>
+                        <DvConsultante>5</DvConsultante>
+                        <RutCompania>77494541</RutCompania>
+                        <DvCompania>5</DvCompania>
+                        <RutReceptor>77494541</RutReceptor>
+                        <DvReceptor>5</DvReceptor>
+                        <TipoDte>33</TipoDte>
+                        <FolioDte>302811</FolioDte>
+                        <FechaEmisionDte>2025-01-20</FechaEmisionDte>
+                        <MontoDte>914553</MontoDte>
+                        <Token>U9J32STURSDUV</Token>
+                    </dte:getEstDte>
+                </soapenv:Body>
+            </soapenv:Envelope>
