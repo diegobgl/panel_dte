@@ -750,14 +750,14 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            self.post_xml_to_chatter(soap_request, description="Solicitud SOAP Consulta Estado DTE")
+            #self.post_xml_to_chatter(soap_request, description="Solicitud SOAP Consulta Estado DTE")
             status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
 
             # 5) Enviar la solicitud
             response_data = self._send_soap_request(status_url, soap_request, '')
 
             # Guardar la respuesta en el Chatter
-            self.post_xml_to_chatter(response_data, description="Respuesta SOAP Consulta Estado DTE")
+            #self.post_xml_to_chatter(response_data, description="Respuesta SOAP Consulta Estado DTE")
             _logger.info(f"Respuesta de estado DTE: {response_data}")
 
             # 6) Parsear la respuesta para extraer <ESTADO> y <GLOSA>
