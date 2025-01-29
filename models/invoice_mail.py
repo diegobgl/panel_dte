@@ -497,25 +497,27 @@ class InvoiceMail(models.Model):
     @api.model
     def _send_soap_request(self, url, soap_body, soap_action_header=''):
         _logger.info(f"Enviando solicitud SOAP a {url}.")
-        
+        # --> Si quieres ver en el log la request completa:
+        _logger.info(f"SOAP Request Body:\n{soap_body}")
+
+        self.post_xml_to_chatter(soap_body, description=f"SOAP Request to {url}")
+        self._store_soap_documents("soap_request", soap_body)
+
         headers = {
             'Content-Type': 'text/xml; charset=utf-8',
             'SOAPAction': soap_action_header,
         }
         try:
             response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, timeout=30)
-            response.raise_for_status()
+            if response.status_code != 200:
+                _logger.error(f"Error HTTP {response.status_code}: {response.text}")
+                raise UserError(f"Error SOAP. Código HTTP: {response.status_code}")
 
-            _logger.info(f"Respuesta SOAP:\n{response.text}")
+            # --> Si quieres ver en el log la response completa:
+            _logger.info(f"SOAP Response Body:\n{response.text}")
 
-            # Publicar mensaje RESUMIDO en el Chatter
-            self.message_post(
-                body=f"<b>SOAP Request a:</b> {url}<br/>"
-                    f"<b>SOAP Response:</b><pre>{html.escape(response.text)}</pre>",
-                subject="Solicitud y Respuesta SOAP",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
+            self.post_xml_to_chatter(response.text, description=f"SOAP Response from {url}")
+            self._store_soap_documents("soap_response", response.text)
 
             return response.text
 
@@ -670,7 +672,8 @@ class InvoiceMail(models.Model):
     # -------------------------------------------------------------------------
     def check_sii_status(self):
         """
-        Consulta el estado del DTE en el SII y registra un mensaje RESUMIDO en el Chatter.
+        Consulta el estado del DTE en el SII y registra los XML generados en el Chatter.
+        AHORA se basa en la API interna para obtener el token SII, en lugar de firmar la semilla.
         """
         self.ensure_one()
         try:
@@ -679,22 +682,40 @@ class InvoiceMail(models.Model):
                 f"TipoDoc: {self.document_type.code}, Folio: {self.folio_number}"
             )
 
-            # Obtener token
+            # Verificamos que exista un RUT principal en la compañía
+            if not self.env.company.vat:
+                raise UserError("No se ha definido el RUT de la compañía principal en Odoo.")
+
+            # Ajustar lógicas de extracción de rut
+            rut_consultante = self.env.company.vat[:-2]
+            dv_consultante = self.env.company.vat[-1]
+            rut_compania = rut_consultante
+            dv_compania = dv_consultante
+
+            if not self.partner_rut:
+                raise UserError("No existe RUT receptor en esta factura.")
+            rut_receptor = self.partner_rut[:-2]
+            dv_receptor = self.partner_rut[-1]
+
+            if not self.date_emission:
+                raise UserError("La factura no tiene Fecha de Emisión (date_emission).")
+
+            # 1) Pedir token a la API interna (en vez de firmar semilla)
             token = self._get_token_from_internal_api()
             _logger.info(f"Token obtenido correctamente (vía API interna): {token}")
 
-            # Construir la solicitud SOAP
+            # 2) Construir la solicitud SOAP para consultar estado del DTE
             soap_request = f"""
             <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
                 <soapenv:Header/>
                 <soapenv:Body>
                     <dte:getEstDte>
-                        <RutConsultante>{self.env.company.vat[:-2]}</RutConsultante>
-                        <DvConsultante>{self.env.company.vat[-1]}</DvConsultante>
-                        <RutCompania>{self.env.company.vat[:-2]}</RutCompania>
-                        <DvCompania>{self.env.company.vat[-1]}</DvCompania>
-                        <RutReceptor>{self.partner_rut[:-2]}</RutReceptor>
-                        <DvReceptor>{self.partner_rut[-1]}</DvReceptor>
+                        <RutConsultante>{rut_consultante}</RutConsultante>
+                        <DvConsultante>{dv_consultante}</DvConsultante>
+                        <RutCompania>{rut_compania}</RutCompania>
+                        <DvCompania>{dv_compania}</DvCompania>
+                        <RutReceptor>{rut_receptor}</RutReceptor>
+                        <DvReceptor>{dv_receptor}</DvReceptor>
                         <TipoDte>{self.document_type.code}</TipoDte>
                         <FolioDte>{self.folio_number}</FolioDte>
                         <FechaEmisionDte>{self.date_emission.strftime('%Y-%m-%d')}</FechaEmisionDte>
@@ -705,11 +726,18 @@ class InvoiceMail(models.Model):
             </soapenv:Envelope>
             """
 
-            # Enviar la solicitud SOAP
+            # Registrar la solicitud en el Chatter (opcional)
+            self.post_xml_to_chatter(soap_request, description="Solicitud SOAP Consulta Estado DTE")
+
+            # 3) Enviar la solicitud
             status_url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
             response_data = self._send_soap_request(status_url, soap_request, '')
 
-            # Parsear la respuesta
+            # Guardar la respuesta en el Chatter
+            self.post_xml_to_chatter(response_data, description="Respuesta SOAP Consulta Estado DTE")
+            _logger.info(f"Respuesta de estado DTE: {response_data}")
+
+            # 4) Parsear la respuesta
             response_root = etree.fromstring(response_data)
             namespaces = {
                 'SII': 'http://www.sii.cl/XMLSchema',
@@ -720,14 +748,20 @@ class InvoiceMail(models.Model):
             glosa_element = response_root.find('.//SII:RESP_HDR/SII:GLOSA', namespaces=namespaces)
             glosa = glosa_element.text if glosa_element is not None else ''
 
-            # Actualizar estado
-            self.l10n_cl_dte_status = 'accepted' if estado == 'DOK' else 'rejected' if estado in ['01', '02'] else 'ask_for_status'
+            _logger.info(f"SII respondió ESTADO={estado}, GLOSA={glosa}")
 
-            # Publicar mensaje RESUMIDO en el Chatter
+            # 5) Actualizar el estado en este registro
+            if estado == '00':
+                self.l10n_cl_dte_status = 'accepted'
+            elif estado in ['01','02','03','04','05','06','07','08','09','10','11','12','-3']:
+                self.l10n_cl_dte_status = 'rejected'
+            else:
+                self.l10n_cl_dte_status = 'ask_for_status'
+
+            # Mensaje final en chatter
             self.message_post(
-                body=f"<b>Estado del DTE:</b> {estado} <br/>"
-                    f"<b>Glosa:</b> {glosa if glosa else 'No disponible'}",
-                subject="Consulta Estado DTE",
+                body=f"Estado del DTE consultado: {estado} - {glosa}",
+                subject="Consulta de Estado DTE",
                 message_type='comment',
                 subtype_xmlid='mail.mt_note',
             )
@@ -738,44 +772,44 @@ class InvoiceMail(models.Model):
 
 
 
-        #def validate xml funcional ok
-        def _validate_sii_response(self, response_data):
-            try:
-                root = etree.fromstring(response_data)
-                estado = root.find('.//ESTADO')
-                if estado is None or estado.text != "00":
-                    raise UserError(f"Error en la respuesta del SII: {estado.text if estado is not None else 'Desconocido'}")
-                return root
-            except Exception as e:
-                raise UserError(f"Respuesta del SII no válida: {e}")
+    #def validate xml funcional ok
+    def _validate_sii_response(self, response_data):
+        try:
+            root = etree.fromstring(response_data)
+            estado = root.find('.//ESTADO')
+            if estado is None or estado.text != "00":
+                raise UserError(f"Error en la respuesta del SII: {estado.text if estado is not None else 'Desconocido'}")
+            return root
+        except Exception as e:
+            raise UserError(f"Respuesta del SII no válida: {e}")
 
 
 
-        def _get_digest_value(self, data):
-            """
-            Calcula el DigestValue (SHA-1 en formato Base64) para el XML firmado.
-            """
-            if isinstance(data, str):
-                data = data.encode('utf-8')  # Asegurar que los datos estén en bytes
+    def _get_digest_value(self, data):
+        """
+        Calcula el DigestValue (SHA-1 en formato Base64) para el XML firmado.
+        """
+        if isinstance(data, str):
+            data = data.encode('utf-8')  # Asegurar que los datos estén en bytes
 
-            # Calcular el hash SHA-1
-            digest = hashlib.sha1(data).digest()
+        # Calcular el hash SHA-1
+        digest = hashlib.sha1(data).digest()
 
-            # Convertir el resultado del hash a Base64
-            return base64.b64encode(digest).decode('utf-8')
+        # Convertir el resultado del hash a Base64
+        return base64.b64encode(digest).decode('utf-8')
 
-        def _get_signature_value(self, private_key, signed_info):
-            """
-            Firma el bloque SignedInfo usando la clave privada proporcionada.
-            :param private_key: Clave privada en formato OpenSSL.
-            :param signed_info: Bloque SignedInfo que se firmará.
-            :return: La firma en Base64.
-            """
-            try:
-                signature = crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')
-                return base64.b64encode(signature).decode('utf-8')
-            except Exception as e:
-                raise UserError(f"Error al generar el SignatureValue: {str(e)}")
+    def _get_signature_value(self, private_key, signed_info):
+        """
+        Firma el bloque SignedInfo usando la clave privada proporcionada.
+        :param private_key: Clave privada en formato OpenSSL.
+        :param signed_info: Bloque SignedInfo que se firmará.
+        :return: La firma en Base64.
+        """
+        try:
+            signature = crypto.sign(private_key, signed_info.encode('utf-8'), 'sha1')
+            return base64.b64encode(signature).decode('utf-8')
+        except Exception as e:
+            raise UserError(f"Error al generar el SignatureValue: {str(e)}")
 
 
 
