@@ -549,15 +549,42 @@ class InvoiceMail(models.Model):
 
     def post_xml_to_chatter(self, xml_content, description="XML generado"):
         """
-        Registra el contenido en el Chatter (como texto con <pre>).
+        Registra solo los valores clave del XML en el Chatter, omitiendo etiquetas innecesarias.
         """
-        escaped_xml = html.escape(xml_content or "")
-        self.message_post(
-            body=f"<b>{description}</b><br/><pre style='white-space: pre-wrap;'>{escaped_xml}</pre>",
-            subject=description,
-            message_type='comment',
-            subtype_xmlid='mail.mt_note',
-        )
+        try:
+            # Parsear el XML
+            root = etree.fromstring(xml_content.encode('utf-8') if isinstance(xml_content, str) else xml_content)
+
+            # Extraer solo los valores de las etiquetas (sin mostrar la estructura XML)
+            values = {elem.tag: elem.text for elem in root.iter() if elem.text and elem.text.strip()}
+
+            # Construir mensaje formateado
+            formatted_values = "<br/>".join([f"🔹 <b>{key}:</b> {html.escape(value)}" for key, value in values.items()])
+
+            # Registrar en el Chatter
+            self.message_post(
+                body=f"<b>{description}</b><br/>{formatted_values}",
+                subject=description,
+                message_type='comment',
+                subtype_xmlid='mail.mt_note',
+            )
+
+        except Exception as e:
+            _logger.error(f"Error procesando XML para el Chatter: {e}")
+            raise UserError(f"Error procesando XML: {e}")
+
+
+    # def post_xml_to_chatter(self, xml_content, description="XML generado"):
+    #     """
+    #     Registra el contenido en el Chatter (como texto con <pre>).
+    #     """
+    #     escaped_xml = html.escape(xml_content or "")
+    #     self.message_post(
+    #         body=f"<b>{description}</b><br/><pre style='white-space: pre-wrap;'>{escaped_xml}</pre>",
+    #         subject=description,
+    #         message_type='comment',
+    #         subtype_xmlid='mail.mt_note',
+    #     )
 
 
     def _store_soap_documents(self, tag_name, content):
