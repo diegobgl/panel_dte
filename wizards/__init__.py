@@ -1,1 +1,1 @@
-from . import dte_reclamo_wizard
+from . import wizard_dte
