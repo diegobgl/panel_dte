@@ -1,26 +1,33 @@
-<record id="view_dte_reclamo_wizard" model="ir.ui.view">
-    <field name="name">dte.reclamo.wizard.form</field>
-    <field name="model">dte.reclamo.wizard</field>
-    <field name="arch" type="xml">
-        <form string="Registrar Aceptación/Reclamo de DTE">
-            <sheet>
-                <group>
-                    <field name="invoice_id" invisible="1"/>
-                    <field name="action_type"/>
-                    <field name="comment"/>
-                </group>
-                <footer>
-                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
-                    <button name="action_send_reclamo" string="Confirmar Envío" type="object" class="oe_highlight"/>
-                </footer>
-            </sheet>
-        </form>
-    </field>
-</record>
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_dte_reclamo_wizard" model="ir.ui.view">
+        <field name="name">dte.reclamo.wizard.form</field>
+        <field name="model">dte.reclamo.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Registrar Aceptación/Reclamo de DTE">
+                <sheet>
+                    <group>
+                        <field name="invoice_id" invisible="1"/>
+                        <field name="action_type"/>
+                        <field name="comment"/>
+                    </group>
+                    <footer>
+                        <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                        <button name="action_send_reclamo" string="Confirmar Envío" type="object" class="oe_highlight"/>
+                    </footer>
+                </sheet>
+            </form>
+        </field>
+    </record>
 
-<record id="action_dte_reclamo_wizard" model="ir.actions.act_window">
-    <field name="name">Registrar Aceptación/Reclamo</field>
-    <field name="res_model">dte.reclamo.wizard</field>
-    <field name="view_mode">form</field>
-    <field name="target">new</field>
-</record>
+    <record id="action_dte_reclamo_wizard" model="ir.actions.act_window">
+        <field name="name">Registrar Aceptación/Reclamo</field>
+        <field name="res_model">dte.reclamo.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    
+
+</odoo>
+
