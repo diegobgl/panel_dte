@@ -5,3 +5,9 @@ access_invoice_mail_line_user,access_invoice_mail_line_user,model_invoice_mail_l
 access_invoice_mail_line_manager,access_invoice_mail_line_manager,model_invoice_mail_line,base.group_system,1,1,1,1
 access_invoice_mail_reference_user,access_invoice_mail_reference_user,model_invoice_mail_reference,base.group_user,1,1,1,1
 access_invoice_mail_reference_manager,access_invoice_mail_reference_manager,model_invoice_mail_reference,base.group_system,1,1,1,1
+
+# Acceso al wizard para usuarios normales
+access_dte_reclamo_wizard_user,access_dte_reclamo_wizard_user,model_dte_reclamo_wizard,base.group_user,1,1,1,0
+
+# Acceso total al wizard para administradores
+access_dte_reclamo_wizard_manager,access_dte_reclamo_wizard_manager,model_dte_reclamo_wizard,base.group_system,1,1,1,1
