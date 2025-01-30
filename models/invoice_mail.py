@@ -568,12 +568,12 @@ class InvoiceMail(models.Model):
             txt = f"--- {tag_name.upper()} ---\n{content}"
             content_binary = base64.b64encode(txt.encode('utf-8'))
             self.xml_signed_file = content_binary
-            self.message_post(
-                body=f"{tag_name} guardado en xml_signed_file",
-                subject="Registro SOAP",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
+            # self.message_post(
+            #     body=f"{tag_name} guardado en xml_signed_file",
+            #     subject="Registro SOAP",
+            #     message_type='comment',
+            #     subtype_xmlid='mail.mt_note',
+            # )
         except Exception as e:
             _logger.error(f"Error al guardar {tag_name}: {e}")
             raise UserError(f"Error al guardar {tag_name}: {e}")
@@ -778,12 +778,12 @@ class InvoiceMail(models.Model):
             else:
                 self.l10n_cl_dte_status = 'ask_for_status'
 
-            self.message_post(
-                body=f"Estado del DTE consultado: {estado} - {glosa}",
-                subject="Consulta de Estado DTE",
-                message_type='comment',
-                subtype_xmlid='mail.mt_note',
-            )
+            # self.message_post(
+            #     body=f"Estado del DTE consultado: {estado} - {glosa}",
+            #     subject="Consulta de Estado DTE",
+            #     message_type='comment',
+            #     subtype_xmlid='mail.mt_note',
+            # )
 
         except Exception as e:
             _logger.error(f"Error consultando el estado del DTE: {e}")
