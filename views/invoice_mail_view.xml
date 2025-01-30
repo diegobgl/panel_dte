@@ -36,9 +36,12 @@
         <field name="arch" type="xml">
             <form string="Factura Electrónica">
                 <header>
+                    <button name="%(action_dte_reclamo_wizard)d" string="Registrar Aceptación/Reclamo" type="action" class="oe_highlight"/>
                     <button name="check_sii_status" type="object" string="Check SII Status" class="btn-secondary"/>
                     <!-- Status Bar -->
                     <field name="l10n_cl_dte_status" widget="statusbar" statusbar_visible="not_sent,ask_for_status,accepted,rejected"/>
+                    <field name="sii_reclamo_status" widget='statusbar' statusbar_visible="pending,accepted,rejected,partial_rejected,total_rejected" />
+
                 </header>
                 <sheet>
                     <group colspan="2">

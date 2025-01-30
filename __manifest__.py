@@ -12,6 +12,7 @@
         'views/config_setting.xml',
         'report/invoice_mail_report_templates.xml',
         'security/ir.model.access.csv',
+        'wizards/dte_reclamo_wizard.xml',
 
     ],
     'installable': True,

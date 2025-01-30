@@ -61,28 +61,18 @@ class InvoiceMail(models.Model):
         string="References"
     )
     response_raw = fields.Text(string="Respuesta XML Cruda")
+    sii_reclamo_status = fields.Selection([
+        ('pending', 'Pendiente'),
+        ('accepted', 'Aceptado'),
+        ('rejected', 'Rechazado'),
+        ('partial_rejected', 'Rechazo Parcial'),
+        ('total_rejected', 'Rechazo Total'),
+         ], string='Estado Reclamo SII', default='pending')
 
 
-
-
-
-    @api.model
-    def generate_pdf_preview(self):
-        """Generate a PDF preview of the document."""
-        template_id = self.env.ref('your_module_name.barcode_stamp_footer')  # Reemplaza 'your_module_name' por el nombre de tu módulo
-        if not template_id:
-            raise UserError("Template for PDF generation not found.")
-
-        # Render the QWeb report
-        report_service = self.env['ir.actions.report']
-        pdf_content, content_type = report_service._render_qweb_pdf(
-            template_id.xml_id, {'o': self}
-        )
-
-        # Store the PDF in binary field
-        self.pdf_preview = base64.b64encode(pdf_content)
-        return True
-
+    # -------------------------------------------------------------------------
+    # #RECIBIR FACTURA Y CREAR REGISTRO , GENERAR PDF, SET ACEPTAR, RECHAZAR
+    # -------------------------------------------------------------------------
 
 
     @api.model
@@ -190,6 +180,22 @@ class InvoiceMail(models.Model):
 
         return record
     
+    @api.model
+    def generate_pdf_preview(self):
+        """Generate a PDF preview of the document."""
+        template_id = self.env.ref('your_module_name.barcode_stamp_footer')  # Reemplaza 'your_module_name' por el nombre de tu módulo
+        if not template_id:
+            raise UserError("Template for PDF generation not found.")
+
+        # Render the QWeb report
+        report_service = self.env['ir.actions.report']
+        pdf_content, content_type = report_service._render_qweb_pdf(
+            template_id.xml_id, {'o': self}
+        )
+
+        # Store the PDF in binary field
+        self.pdf_preview = base64.b64encode(pdf_content)
+        return True
 
     @api.depends('xml_file')
     def _compute_attachments_count(self):
@@ -606,107 +612,107 @@ class InvoiceMail(models.Model):
             raise UserError(f"Error al guardar {tag_name}: {e}")
 
 
-    # get dte claim funcional ok
-    def _get_dte_claim(self, emitter_vat, document_type_code, document_number, date_emission, amount_total):
-        """
-        Consultar estado del DTE en SII (documento que hemos recibido).
-        - emitter_vat: RUT completo del Emisor (ej. '12345678-9')
-        - document_type_code: Ej. '33'
-        - document_number: Folio del DTE
-        - date_emission: Fecha datetime/date en Odoo
-        - amount_total: Monto total del DTE
-        """
-        try:
-            # 1) Preparar RUT consultante y receptor (tu misma empresa, pues recibes el DTE).
-            if not self.env.company.vat:
-                raise UserError("No está configurado el RUT de la compañía en Odoo.")
-            rut_consultante, dv_consultante = self._split_vat(self.env.company.vat)
-            rut_receptor, dv_receptor = rut_consultante, dv_consultante  # Mismo RUT si documento es recibido
+    # # get dte claim funcional ok
+    # def _get_dte_claim(self, emitter_vat, document_type_code, document_number, date_emission, amount_total):
+    #     """
+    #     Consultar estado del DTE en SII (documento que hemos recibido).
+    #     - emitter_vat: RUT completo del Emisor (ej. '12345678-9')
+    #     - document_type_code: Ej. '33'
+    #     - document_number: Folio del DTE
+    #     - date_emission: Fecha datetime/date en Odoo
+    #     - amount_total: Monto total del DTE
+    #     """
+    #     try:
+    #         # 1) Preparar RUT consultante y receptor (tu misma empresa, pues recibes el DTE).
+    #         if not self.env.company.vat:
+    #             raise UserError("No está configurado el RUT de la compañía en Odoo.")
+    #         rut_consultante, dv_consultante = self._split_vat(self.env.company.vat)
+    #         rut_receptor, dv_receptor = rut_consultante, dv_consultante  # Mismo RUT si documento es recibido
 
-            # 2) Preparar RUT compañía emisora (desde 'emitter_vat').
-            if not emitter_vat:
-                raise UserError("No se proporcionó el RUT del Emisor para la consulta.")
-            rut_compania, dv_compania = self._split_vat(emitter_vat)
+    #         # 2) Preparar RUT compañía emisora (desde 'emitter_vat').
+    #         if not emitter_vat:
+    #             raise UserError("No se proporcionó el RUT del Emisor para la consulta.")
+    #         rut_compania, dv_compania = self._split_vat(emitter_vat)
 
-            # 3) Obtener token de la API interna (o del método que uses para firmar semilla).
-            _logger.info("Obteniendo token para la consulta del DTE...")
-            token = self._get_token_from_internal_api()
-            if not token:
-                raise UserError("No se pudo obtener un token válido para la consulta al SII.")
+    #         # 3) Obtener token de la API interna (o del método que uses para firmar semilla).
+    #         _logger.info("Obteniendo token para la consulta del DTE...")
+    #         token = self._get_token_from_internal_api()
+    #         if not token:
+    #             raise UserError("No se pudo obtener un token válido para la consulta al SII.")
 
-            # 4) Construir la solicitud SOAP
-            url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
-            soap_request = f"""
-            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
-                <soapenv:Header/>
-                <soapenv:Body>
-                    <dte:getEstDte>
-                        <RutConsultante>{rut_consultante}</RutConsultante>
-                        <DvConsultante>{dv_consultante}</DvConsultante>
-                        <RutCompania>{rut_compania}</RutCompania>
-                        <DvCompania>{dv_compania}</DvCompania>
-                        <RutReceptor>{rut_receptor}</RutReceptor>
-                        <DvReceptor>{dv_receptor}</DvReceptor>
-                        <TipoDte>{document_type_code}</TipoDte>
-                        <FolioDte>{document_number}</FolioDte>
-                        <FechaEmisionDte>{date_emission.strftime('%d-%m-%Y')}</FechaEmisionDte>
-                        <MontoDte>{int(amount_total)}</MontoDte>
-                        <Token>{token}</Token>
-                    </dte:getEstDte>
-                </soapenv:Body>
-            </soapenv:Envelope>
-            """
-            _logger.info(f"Enviando solicitud SOAP a {url}:\n{soap_request}")
+    #         # 4) Construir la solicitud SOAP
+    #         url = "https://palena.sii.cl/DTEWS/QueryEstDte.jws"
+    #         soap_request = f"""
+    #         <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:dte="http://DefaultNamespace">
+    #             <soapenv:Header/>
+    #             <soapenv:Body>
+    #                 <dte:getEstDte>
+    #                     <RutConsultante>{rut_consultante}</RutConsultante>
+    #                     <DvConsultante>{dv_consultante}</DvConsultante>
+    #                     <RutCompania>{rut_compania}</RutCompania>
+    #                     <DvCompania>{dv_compania}</DvCompania>
+    #                     <RutReceptor>{rut_receptor}</RutReceptor>
+    #                     <DvReceptor>{dv_receptor}</DvReceptor>
+    #                     <TipoDte>{document_type_code}</TipoDte>
+    #                     <FolioDte>{document_number}</FolioDte>
+    #                     <FechaEmisionDte>{date_emission.strftime('%d-%m-%Y')}</FechaEmisionDte>
+    #                     <MontoDte>{int(amount_total)}</MontoDte>
+    #                     <Token>{token}</Token>
+    #                 </dte:getEstDte>
+    #             </soapenv:Body>
+    #         </soapenv:Envelope>
+    #         """
+    #         _logger.info(f"Enviando solicitud SOAP a {url}:\n{soap_request}")
 
-            # 5) Envío con urllib3
-            http = urllib3.PoolManager()
-            headers = {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': ''
-            }
-            response = http.request('POST', url, body=soap_request.encode('utf-8'), headers=headers)
-            if response.status != 200:
-                raise UserError(f"Error HTTP {response.status} en consulta al SII: {response.data}")
+    #         # 5) Envío con urllib3
+    #         http = urllib3.PoolManager()
+    #         headers = {
+    #             'Content-Type': 'text/xml; charset=utf-8',
+    #             'SOAPAction': ''
+    #         }
+    #         response = http.request('POST', url, body=soap_request.encode('utf-8'), headers=headers)
+    #         if response.status != 200:
+    #             raise UserError(f"Error HTTP {response.status} en consulta al SII: {response.data}")
 
-            # 6) Parsear respuesta SOAP
-            #    OJO: La respuesta viene con un XML anidado dentro de <getEstDteReturn>
-            #    Debes extraer ese segundo XML real donde sale <ESTADO>, <ERR_CODE>, etc.
-            root_soap = etree.fromstring(response.data, etree.XMLParser(recover=True))
+    #         # 6) Parsear respuesta SOAP
+    #         #    OJO: La respuesta viene con un XML anidado dentro de <getEstDteReturn>
+    #         #    Debes extraer ese segundo XML real donde sale <ESTADO>, <ERR_CODE>, etc.
+    #         root_soap = etree.fromstring(response.data, etree.XMLParser(recover=True))
             
-            # Buscar el tag <getEstDteReturn> que contiene el segundo XML en texto escapado
-            ns_soap = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/', 'ns1': 'http://DefaultNamespace'}
-            getEstDteReturn = root_soap.find('.//ns1:getEstDteReturn', namespaces=ns_soap)
-            if getEstDteReturn is None or not getEstDteReturn.text:
-                raise UserError("No se encontró <getEstDteReturn> con la respuesta del SII.")
+    #         # Buscar el tag <getEstDteReturn> que contiene el segundo XML en texto escapado
+    #         ns_soap = {'soapenv': 'http://schemas.xmlsoap.org/soap/envelope/', 'ns1': 'http://DefaultNamespace'}
+    #         getEstDteReturn = root_soap.find('.//ns1:getEstDteReturn', namespaces=ns_soap)
+    #         if getEstDteReturn is None or not getEstDteReturn.text:
+    #             raise UserError("No se encontró <getEstDteReturn> con la respuesta del SII.")
 
-            # Des-escape para obtener XML interno
-            second_xml_unescaped = html.unescape(getEstDteReturn.text)
-            # Parseamos el segundo XML, quitando la cabecera <?xml ...> si diera conflicto
-            parser = etree.XMLParser(remove_encoding_decl=True, recover=True)
-            second_root = etree.fromstring(second_xml_unescaped.encode('utf-8'), parser=parser)
+    #         # Des-escape para obtener XML interno
+    #         second_xml_unescaped = html.unescape(getEstDteReturn.text)
+    #         # Parseamos el segundo XML, quitando la cabecera <?xml ...> si diera conflicto
+    #         parser = etree.XMLParser(remove_encoding_decl=True, recover=True)
+    #         second_root = etree.fromstring(second_xml_unescaped.encode('utf-8'), parser=parser)
 
-            # 7) Extraer datos: <ESTADO>, <ERR_CODE>, <GLOSA_ERR>, etc.
-            sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
-            estado_node = second_root.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
-            err_code_node = second_root.find('.//SII:RESP_HDR/SII:ERR_CODE', namespaces=sii_ns)
-            glosa_err_node = second_root.find('.//SII:RESP_HDR/SII:GLOSA_ERR', namespaces=sii_ns)
+    #         # 7) Extraer datos: <ESTADO>, <ERR_CODE>, <GLOSA_ERR>, etc.
+    #         sii_ns = {'SII': 'http://www.sii.cl/XMLSchema'}
+    #         estado_node = second_root.find('.//SII:RESP_HDR/SII:ESTADO', namespaces=sii_ns)
+    #         err_code_node = second_root.find('.//SII:RESP_HDR/SII:ERR_CODE', namespaces=sii_ns)
+    #         glosa_err_node = second_root.find('.//SII:RESP_HDR/SII:GLOSA_ERR', namespaces=sii_ns)
 
-            estado = estado_node.text if estado_node is not None else ''
-            err_code = err_code_node.text if err_code_node is not None else ''
-            glosa_err = glosa_err_node.text if glosa_err_node is not None else ''
+    #         estado = estado_node.text if estado_node is not None else ''
+    #         err_code = err_code_node.text if err_code_node is not None else ''
+    #         glosa_err = glosa_err_node.text if glosa_err_node is not None else ''
 
-            _logger.info(f"Respuesta SII => ESTADO: {estado}, ERR_CODE: {err_code}, GLOSA_ERR: {glosa_err}")
+    #         _logger.info(f"Respuesta SII => ESTADO: {estado}, ERR_CODE: {err_code}, GLOSA_ERR: {glosa_err}")
 
-            # 8) Manejo de la lógica de resultado
-            if err_code:
-                # Ejemplo: -1861 => "Error Interno"
-                raise UserError(f"Consulta SII con error. ERR_CODE: {err_code}, GLOSA_ERR: {glosa_err}")
+    #         # 8) Manejo de la lógica de resultado
+    #         if err_code:
+    #             # Ejemplo: -1861 => "Error Interno"
+    #             raise UserError(f"Consulta SII con error. ERR_CODE: {err_code}, GLOSA_ERR: {glosa_err}")
 
-            return estado  # Retorna el código de estado SII (e.g. '0', '1', etc.)
+    #         return estado  # Retorna el código de estado SII (e.g. '0', '1', etc.)
 
-        except Exception as e:
-            _logger.error(f"Error consultando el estado del DTE: {e}")
-            raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
+    #     except Exception as e:
+    #         _logger.error(f"Error consultando el estado del DTE: {e}")
+    #         raise UserError(f"Error al consultar el estado del DTE en el SII: {e}")
     
 
 
@@ -716,6 +722,8 @@ class InvoiceMail(models.Model):
     #     """
     #     numbers = private_key.private_numbers()
     #     return base64.b64encode(numbers.public_numbers.n.to_bytes((numbers.public_numbers.n.bit_length() + 7) // 8, byteorder='big')).decode('utf-8')
+
+
 
     # -------------------------------------------------------------------------
     # FUNCIONES PRINCIPALES PARA CONSULTAR ESTADO AL SII
