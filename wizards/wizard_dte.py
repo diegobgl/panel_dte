@@ -23,7 +23,7 @@ class DTEReclamoWizard(models.TransientModel):
     comment = fields.Text(string="Comentario Adicional")
 
     #action_send_reclamo
-    def send_reclamo(self):
+    def action_send_reclamo(self):
         """ Enviar el reclamo al SII """
         if not self.invoice_id:
             raise UserError("Debe estar relacionado con un DTE antes de enviar el reclamo.")
