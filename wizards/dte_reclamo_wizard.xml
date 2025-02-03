@@ -25,6 +25,7 @@
         <field name="res_model">dte.reclamo.wizard</field>
         <field name="view_mode">form</field>
         <field name="target">new</field>
+        <field name="context">{'default_invoice_id': active_id}</field>
     </record>
 
     
