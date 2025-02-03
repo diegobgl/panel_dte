@@ -7,7 +7,7 @@
             <form string="Registrar Aceptación/Reclamo de DTE">
                 <sheet>
                     <group>
-                        <field name="invoice_id" invisible="1"/>
+                        <field name="invoice_id" readonly="1"/>
                         <field name="action_type"/>
                         <field name="comment"/>
                     </group>
